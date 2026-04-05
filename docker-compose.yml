@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  kite-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["agent", "--stream", "--config", "/etc/kite/config.yaml"]
+    volumes:
+      - ./configs/kite-collector.example.yaml:/etc/kite/config.yaml:ro
+    environment:
+      KITE_POSTGRES_DSN: "postgres://kite:kite@postgres:5432/kite?sslmode=disable"
+      KITE_STREAMING_OTLP_ENDPOINT: "otelcol:4318"
+      KITE_STREAMING_OTLP_PROTOCOL: "http"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kite
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kite
+      POSTGRES_PASSWORD: kite
+      POSTGRES_DB: kite
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kite -d kite"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kite
+
+volumes:
+  pgdata:
+
+networks:
+  kite:
+    driver: bridge

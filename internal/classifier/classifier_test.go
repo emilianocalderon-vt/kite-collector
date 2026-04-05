@@ -3,6 +3,7 @@ package classifier
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vulnertrack/kite-collector/internal/model"
@@ -142,4 +143,132 @@ func TestClassifier_ClassifySingle(t *testing.T) {
 
 	assert.Equal(t, model.AuthorizationAuthorized, asset.IsAuthorized)
 	assert.Equal(t, model.ManagedUnknown, asset.IsManaged)
+}
+
+// ---------------------------------------------------------------------------
+// Manager — EvaluateWithSoftware (Phase 2)
+// ---------------------------------------------------------------------------
+
+func TestManager_EvaluateWithSoftware_EmptyControls_ReturnsUnknown(t *testing.T) {
+	mgr := NewManager(nil)
+
+	asset := model.Asset{Hostname: "host-01"}
+	sw := []model.InstalledSoftware{{SoftwareName: "CrowdStrike Falcon"}}
+	assert.Equal(t, model.ManagedUnknown, mgr.EvaluateWithSoftware(asset, sw))
+}
+
+func TestManager_EvaluateWithSoftware_AllControlsPresent_ReturnsManaged(t *testing.T) {
+	mgr := NewManager([]string{"crowdstrike", "osquery"})
+
+	asset := model.Asset{Hostname: "host-01"}
+	sw := []model.InstalledSoftware{
+		{SoftwareName: "CrowdStrike Falcon"},
+		{SoftwareName: "osquery agent"},
+		{SoftwareName: "nginx"},
+	}
+	assert.Equal(t, model.ManagedManaged, mgr.EvaluateWithSoftware(asset, sw))
+}
+
+func TestManager_EvaluateWithSoftware_MissingControl_ReturnsUnmanaged(t *testing.T) {
+	mgr := NewManager([]string{"crowdstrike", "osquery"})
+
+	asset := model.Asset{Hostname: "host-01"}
+	sw := []model.InstalledSoftware{
+		{SoftwareName: "CrowdStrike Falcon"},
+		{SoftwareName: "nginx"},
+	}
+	assert.Equal(t, model.ManagedUnmanaged, mgr.EvaluateWithSoftware(asset, sw))
+}
+
+func TestManager_EvaluateWithSoftware_EmptySoftwareList_ReturnsUnmanaged(t *testing.T) {
+	mgr := NewManager([]string{"edr_agent"})
+
+	asset := model.Asset{Hostname: "host-01"}
+	assert.Equal(t, model.ManagedUnmanaged, mgr.EvaluateWithSoftware(asset, nil))
+}
+
+func TestManager_EvaluateWithSoftware_CaseInsensitive(t *testing.T) {
+	mgr := NewManager([]string{"CROWDSTRIKE"})
+
+	asset := model.Asset{Hostname: "host-01"}
+	sw := []model.InstalledSoftware{{SoftwareName: "crowdstrike falcon sensor"}}
+	assert.Equal(t, model.ManagedManaged, mgr.EvaluateWithSoftware(asset, sw))
+}
+
+// ---------------------------------------------------------------------------
+// Classifier — ClassifyWithSoftware (Phase 2)
+// ---------------------------------------------------------------------------
+
+func TestClassifier_ClassifyWithSoftware(t *testing.T) {
+	auth := &Authorizer{
+		entries:     []AllowlistEntry{{Hostname: "web-01"}},
+		matchFields: []string{"hostname"},
+	}
+	mgr := NewManager([]string{"edr"})
+	cls := New(auth, mgr)
+
+	asset := model.Asset{Hostname: "web-01"}
+	sw := []model.InstalledSoftware{{SoftwareName: "EDR Agent v3"}}
+
+	cls.ClassifyWithSoftware(&asset, sw)
+
+	assert.Equal(t, model.AuthorizationAuthorized, asset.IsAuthorized)
+	assert.Equal(t, model.ManagedManaged, asset.IsManaged)
+}
+
+func TestClassifier_ClassifyWithSoftware_NoMatch(t *testing.T) {
+	auth := &Authorizer{
+		entries:     []AllowlistEntry{{Hostname: "web-01"}},
+		matchFields: []string{"hostname"},
+	}
+	mgr := NewManager([]string{"edr"})
+	cls := New(auth, mgr)
+
+	asset := model.Asset{Hostname: "web-01"}
+	sw := []model.InstalledSoftware{{SoftwareName: "nginx"}}
+
+	cls.ClassifyWithSoftware(&asset, sw)
+
+	assert.Equal(t, model.AuthorizationAuthorized, asset.IsAuthorized)
+	assert.Equal(t, model.ManagedUnmanaged, asset.IsManaged)
+}
+
+func TestClassifier_ClassifyAllWithSoftware(t *testing.T) {
+	auth := &Authorizer{
+		entries:     []AllowlistEntry{{Hostname: "known-*"}},
+		matchFields: []string{"hostname"},
+	}
+	mgr := NewManager([]string{"edr"})
+	cls := New(auth, mgr)
+
+	id1 := uuid.New()
+	id2 := uuid.New()
+	id3 := uuid.New()
+
+	assets := []model.Asset{
+		{ID: id1, Hostname: "known-01", AssetType: model.AssetTypeServer},
+		{ID: id2, Hostname: "known-02", AssetType: model.AssetTypeServer},
+		{ID: id3, Hostname: "rogue-01", AssetType: model.AssetTypeWorkstation},
+	}
+
+	softwareMap := map[uuid.UUID][]model.InstalledSoftware{
+		id1: {{SoftwareName: "EDR Agent"}},
+		// id2 has no software entry -- should fall back to Phase 1
+		id3: {{SoftwareName: "nginx"}},
+	}
+
+	result := cls.ClassifyAllWithSoftware(assets, softwareMap)
+	require.Len(t, result, 3)
+
+	// id1: authorized + managed (EDR present)
+	assert.Equal(t, model.AuthorizationAuthorized, result[0].IsAuthorized)
+	assert.Equal(t, model.ManagedManaged, result[0].IsManaged)
+
+	// id2: authorized + unmanaged (no software data, Phase 1 fallback)
+	assert.Equal(t, model.AuthorizationAuthorized, result[1].IsAuthorized)
+	assert.Equal(t, model.ManagedUnmanaged, result[1].IsManaged)
+
+	// id3: unauthorized + unmanaged (no EDR in software list)
+	assert.Equal(t, model.AuthorizationUnauthorized, result[2].IsAuthorized)
+	assert.Equal(t, model.ManagedUnmanaged, result[2].IsManaged)
 }

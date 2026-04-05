@@ -32,6 +32,7 @@ import (
 	"github.com/vulnertrack/kite-collector/internal/model"
 	"github.com/vulnertrack/kite-collector/internal/policy"
 	"github.com/vulnertrack/kite-collector/internal/store"
+	"github.com/vulnertrack/kite-collector/internal/store/postgres"
 	"github.com/vulnertrack/kite-collector/internal/store/sqlite"
 )
 
@@ -546,19 +547,34 @@ func runAgent(cfgFile, dbPath, interval string, verbose, stream bool) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
-	dataDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dataDir, 0o750); err != nil {
-		return fmt.Errorf("create data dir %s: %w", dataDir, err)
-	}
-
-	st, err := sqlite.New(dbPath)
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer func() { _ = st.Close() }()
-
-	if err = st.Migrate(ctx); err != nil {
-		return fmt.Errorf("migrate store: %w", err)
+	// Select store backend: PostgreSQL if DSN is configured, otherwise SQLite.
+	var st store.Store
+	if cfg.Postgres.DSN != "" {
+		slog.Info("agent: using PostgreSQL backend")
+		pgStore, pgErr := postgres.New(cfg.Postgres.DSN)
+		if pgErr != nil {
+			return fmt.Errorf("open postgres store: %w", pgErr)
+		}
+		defer func() { _ = pgStore.Close() }()
+		if pgErr = pgStore.Migrate(ctx); pgErr != nil {
+			return fmt.Errorf("migrate postgres store: %w", pgErr)
+		}
+		st = pgStore
+	} else {
+		slog.Info("agent: using SQLite backend", "path", dbPath)
+		dataDir := filepath.Dir(dbPath)
+		if mkErr := os.MkdirAll(dataDir, 0o750); mkErr != nil {
+			return fmt.Errorf("create data dir %s: %w", dataDir, mkErr)
+		}
+		sqliteStore, sqlErr := sqlite.New(dbPath)
+		if sqlErr != nil {
+			return fmt.Errorf("open sqlite store: %w", sqlErr)
+		}
+		defer func() { _ = sqliteStore.Close() }()
+		if sqlErr = sqliteStore.Migrate(ctx); sqlErr != nil {
+			return fmt.Errorf("migrate sqlite store: %w", sqlErr)
+		}
+		st = sqliteStore
 	}
 
 	registry := discovery.NewRegistry()
