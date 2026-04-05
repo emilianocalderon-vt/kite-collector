@@ -12,6 +12,7 @@ import (
 	"github.com/vulnertrack/kite-collector/internal/config"
 	"github.com/vulnertrack/kite-collector/internal/dedup"
 	"github.com/vulnertrack/kite-collector/internal/discovery"
+	"github.com/vulnertrack/kite-collector/internal/discovery/agent/software"
 	"github.com/vulnertrack/kite-collector/internal/emitter"
 	"github.com/vulnertrack/kite-collector/internal/metrics"
 	"github.com/vulnertrack/kite-collector/internal/model"
@@ -104,6 +105,33 @@ func (e *Engine) Run(ctx context.Context, cfg *config.Config) (*model.ScanResult
 	}
 	slog.Info("engine: persisted assets", "inserted", inserted, "updated", updated)
 
+	// Collect and persist installed software for the agent asset.
+	if agentCfg, ok := configs["agent"]; ok {
+		if cs, ok := agentCfg["collect_software"].(bool); ok && cs {
+			if agentID := findAgentAssetID(assets); agentID != uuid.Nil {
+				swReg := software.NewRegistry()
+				swResult := swReg.Collect(ctx)
+				if len(swResult.Items) > 0 {
+					for i := range swResult.Items {
+						swResult.Items[i].AssetID = agentID
+					}
+					if swErr := e.store.UpsertSoftware(ctx, agentID, swResult.Items); swErr != nil {
+						slog.Warn("engine: failed to persist software", "error", swErr)
+					} else {
+						slog.Info("engine: persisted software",
+							"asset_id", agentID,
+							"count", len(swResult.Items),
+							"parse_errors", swResult.TotalErrors(),
+						)
+					}
+				}
+				if swResult.HasErrors() {
+					slog.Warn("engine: software parse errors", "count", swResult.TotalErrors())
+				}
+			}
+		}
+	}
+
 	staleAssets, err := e.store.GetStaleAssets(ctx, cfg.StaleThresholdDuration())
 	if err != nil {
 		slog.Warn("engine: failed to detect stale assets", "error", err)
@@ -187,4 +215,14 @@ func (e *Engine) Run(ctx context.Context, cfg *config.Config) (*model.ScanResult
 	)
 
 	return result, nil
+}
+
+// findAgentAssetID returns the ID of the first asset with DiscoverySource "agent".
+func findAgentAssetID(assets []model.Asset) uuid.UUID {
+	for _, a := range assets {
+		if a.DiscoverySource == "agent" {
+			return a.ID
+		}
+	}
+	return uuid.Nil
 }
