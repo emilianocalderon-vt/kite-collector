@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,14 +14,17 @@ import (
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/vulnertrack/kite-collector/api/rest"
 	"github.com/vulnertrack/kite-collector/internal/classifier"
 	"github.com/vulnertrack/kite-collector/internal/config"
 	"github.com/vulnertrack/kite-collector/internal/dedup"
 	"github.com/vulnertrack/kite-collector/internal/discovery"
 	"github.com/vulnertrack/kite-collector/internal/discovery/agent"
+	"github.com/vulnertrack/kite-collector/internal/discovery/cloud"
 	"github.com/vulnertrack/kite-collector/internal/discovery/network"
 	"github.com/vulnertrack/kite-collector/internal/emitter"
 	"github.com/vulnertrack/kite-collector/internal/engine"
@@ -75,7 +79,9 @@ lifecycle events for downstream consumption.`,
 
 	root.AddCommand(
 		newScanCmd(),
+		newAgentCmd(),
 		newDiffCmd(),
+		newReportCmd(),
 		newVersionCmd(),
 	)
 
@@ -178,6 +184,9 @@ func runScan(cfgFile string, scope []string, output, dbPath string, sources []st
 	registry := discovery.NewRegistry()
 	registry.Register(network.New())
 	registry.Register(agent.New())
+	registry.Register(cloud.NewAWS())
+	registry.Register(cloud.NewGCP())
+	registry.Register(cloud.NewAzure())
 
 	// Set up deduplicator.
 	dd := dedup.New(st)
@@ -476,6 +485,297 @@ func formatDiffCSV(result DiffResult, showUnchanged bool) {
 			_ = w.Write([]string{"unchanged", a.Hostname, string(a.AssetType), string(a.IsAuthorized), string(a.IsManaged), a.OSVersion, ""})
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// agent command (streaming mode)
+// ---------------------------------------------------------------------------
+
+func newAgentCmd() *cobra.Command {
+	var (
+		stream   bool
+		interval string
+		cfgFile  string
+		dbPath   string
+		verbose  bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "agent",
+		Short: "Run continuous asset discovery agent",
+		Long: `Start a long-running agent that performs periodic scan cycles and emits
+OTLP events to the configured collector endpoint. Use --stream to enable
+continuous mode with a configurable scan interval.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAgent(cfgFile, dbPath, interval, verbose, stream)
+		},
+	}
+
+	cmd.Flags().BoolVar(&stream, "stream", false, "enable continuous streaming mode")
+	cmd.Flags().StringVar(&interval, "interval", "", "scan interval (overrides config, e.g. 6h)")
+	cmd.Flags().StringVar(&cfgFile, "config", "kite-collector.yaml", "path to configuration file")
+	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logging")
+
+	return cmd
+}
+
+func runAgent(cfgFile, dbPath, interval string, verbose, stream bool) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	var cfg *config.Config
+	if _, err := os.Stat(cfgFile); os.IsNotExist(err) {
+		c, loadErr := config.Load("")
+		if loadErr != nil {
+			return fmt.Errorf("load default config: %w", loadErr)
+		}
+		cfg = c
+	} else {
+		c, loadErr := config.Load(cfgFile)
+		if loadErr != nil {
+			return fmt.Errorf("load config %s: %w", cfgFile, loadErr)
+		}
+		cfg = c
+	}
+
+	logLevel := slog.LevelInfo
+	if verbose || strings.EqualFold(cfg.LogLevel, "debug") {
+		logLevel = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(logger)
+
+	dataDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return fmt.Errorf("create data dir %s: %w", dataDir, err)
+	}
+
+	st, err := sqlite.New(dbPath)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	if err = st.Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate store: %w", err)
+	}
+
+	registry := discovery.NewRegistry()
+	registry.Register(network.New())
+	registry.Register(agent.New())
+	registry.Register(cloud.NewAWS())
+	registry.Register(cloud.NewGCP())
+	registry.Register(cloud.NewAzure())
+
+	dd := dedup.New(st)
+
+	authorizer, err := classifier.NewAuthorizer(
+		cfg.Classification.Authorization.AllowlistFile,
+		cfg.Classification.Authorization.MatchFields,
+	)
+	if err != nil {
+		return fmt.Errorf("create authorizer: %w", err)
+	}
+	manager := classifier.NewManager(cfg.Classification.Managed.RequiredControls)
+	cls := classifier.New(authorizer, manager)
+
+	// Set up OTLP emitter if endpoint is configured, otherwise noop.
+	var em emitter.Emitter
+	if cfg.Streaming.OTLP.Endpoint != "" {
+		otlpCfg := emitter.OTLPConfig{
+			Endpoint: cfg.Streaming.OTLP.Endpoint,
+			Protocol: cfg.Streaming.OTLP.Protocol,
+			TLS: emitter.TLSConfig{
+				Enabled:  cfg.Streaming.OTLP.TLS.Enabled,
+				CertFile: cfg.Streaming.OTLP.TLS.CertFile,
+				KeyFile:  cfg.Streaming.OTLP.TLS.KeyFile,
+				CAFile:   cfg.Streaming.OTLP.TLS.CAFile,
+			},
+		}
+		otlpEmitter, otlpErr := emitter.NewOTLP(otlpCfg, version)
+		if otlpErr != nil {
+			return fmt.Errorf("create OTLP emitter: %w", otlpErr)
+		}
+		em = otlpEmitter
+		defer func() { _ = otlpEmitter.Shutdown(context.Background()) }()
+	} else {
+		em = emitter.NewNoop()
+	}
+
+	defaultRules := []model.SeverityRule{
+		{IsAuthorized: model.AuthorizationUnauthorized, IsManaged: model.ManagedUnmanaged, Severity: model.SeverityCritical},
+		{IsAuthorized: model.AuthorizationUnauthorized, Severity: model.SeverityHigh},
+		{IsManaged: model.ManagedUnmanaged, Severity: model.SeverityMedium},
+	}
+	pol := policy.New(defaultRules, cfg.StaleThresholdDuration())
+
+	met := metrics.New()
+	if cfg.Metrics.Enabled {
+		listen := cfg.Metrics.Listen
+		if listen == "" {
+			listen = ":9090"
+		}
+		met.Serve(listen)
+	}
+
+	eng := engine.New(st, registry, dd, cls, em, pol, met)
+
+	// Start REST API in background.
+	apiHandler := rest.New(st, logger)
+	apiMux := apiHandler.Mux()
+	apiMux.Handle("/metrics", met.Handler())
+
+	apiAddr := ":8080"
+	apiSrv := &http.Server{
+		Addr:              apiAddr,
+		Handler:           apiMux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		slog.Info("starting REST API server", "addr", apiAddr)
+		if srvErr := apiSrv.ListenAndServe(); srvErr != nil && srvErr != http.ErrServerClosed {
+			slog.Error("REST API server error", "error", srvErr)
+		}
+	}()
+
+	if !stream {
+		// One-shot mode via agent command (no --stream flag).
+		result, scanErr := eng.Run(ctx, cfg)
+		if scanErr != nil {
+			return fmt.Errorf("agent scan failed: %w", scanErr)
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Agent scan complete: %d total, %d new, %d updated, %d stale\n",
+			result.TotalAssets, result.NewAssets, result.UpdatedAssets, result.StaleAssets)
+		return nil
+	}
+
+	// Continuous streaming mode.
+	scanInterval := cfg.StreamingInterval()
+	if interval != "" {
+		if d, parseErr := time.ParseDuration(interval); parseErr == nil {
+			scanInterval = d
+		}
+	}
+
+	slog.Info("agent: starting streaming mode", "interval", scanInterval)
+
+	// Run initial scan immediately.
+	if result, scanErr := eng.Run(ctx, cfg); scanErr != nil {
+		slog.Error("agent: initial scan failed", "error", scanErr)
+	} else {
+		slog.Info("agent: initial scan complete",
+			"total", result.TotalAssets,
+			"new", result.NewAssets,
+		)
+	}
+
+	ticker := time.NewTicker(scanInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("agent: shutting down")
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			_ = apiSrv.Shutdown(shutdownCtx)
+			return nil
+		case <-ticker.C:
+			if result, scanErr := eng.Run(ctx, cfg); scanErr != nil {
+				slog.Error("agent: scan failed", "error", scanErr)
+			} else {
+				slog.Info("agent: scan complete",
+					"total", result.TotalAssets,
+					"new", result.NewAssets,
+					"updated", result.UpdatedAssets,
+					"stale", result.StaleAssets,
+				)
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// report command
+// ---------------------------------------------------------------------------
+
+func newReportCmd() *cobra.Command {
+	var (
+		dbPath string
+		format string
+		output string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "report",
+		Short: "Generate asset inventory report",
+		Long: `Read the SQLite database and produce a report in the requested format.
+Supported formats: json, csv, table.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runReport(dbPath, format, output)
+		},
+	}
+
+	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&format, "format", "table", "report format: json, csv, table")
+	cmd.Flags().StringVar(&output, "output", "", "output file path (default: stdout)")
+
+	return cmd
+}
+
+func runReport(dbPath, format, outputPath string) error {
+	ctx := context.Background()
+
+	st, err := sqlite.New(dbPath)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	assets, err := st.ListAssets(ctx, store.AssetFilter{})
+	if err != nil {
+		return fmt.Errorf("list assets: %w", err)
+	}
+
+	latestRun, _ := st.GetLatestScanRun(ctx)
+
+	// If an output file is requested, redirect stdout.
+	if outputPath != "" {
+		f, fErr := os.Create(outputPath) //#nosec G304 -- path from trusted CLI flag
+		if fErr != nil {
+			return fmt.Errorf("create output file: %w", fErr)
+		}
+		defer func() { _ = f.Close() }()
+		os.Stdout = f
+	}
+
+	switch strings.ToLower(format) {
+	case "json":
+		report := map[string]any{
+			"generated_at": time.Now().UTC().Format(time.RFC3339),
+			"total_assets": len(assets),
+			"assets":       assets,
+		}
+		if latestRun != nil {
+			report["latest_scan"] = latestRun
+		}
+		return formatJSON(report)
+	case "csv":
+		formatCSV(assets)
+	default:
+		if latestRun != nil {
+			fmt.Printf("Latest scan: %s (total: %d, new: %d, stale: %d)\n\n",
+				latestRun.StartedAt.Format(time.RFC3339),
+				latestRun.TotalAssets,
+				latestRun.NewAssets,
+				latestRun.StaleAssets,
+			)
+		}
+		formatTable(assets)
+	}
+
+	return nil
 }
 
 // ---------------------------------------------------------------------------

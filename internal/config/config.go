@@ -9,12 +9,14 @@ import (
 
 // Config is the top-level configuration structure.
 type Config struct {
+	Discovery      DiscoveryConfig      `mapstructure:"discovery"`
+	Classification ClassificationConfig `mapstructure:"classification"`
+	Streaming      StreamingConfig      `mapstructure:"streaming"`
+	Postgres       PostgresConfig       `mapstructure:"postgres"`
 	LogLevel       string               `mapstructure:"log_level"`
 	OutputFormat   string               `mapstructure:"output_format"`
 	DataDir        string               `mapstructure:"data_dir"`
 	StaleThreshold string               `mapstructure:"stale_threshold"` // duration string like "168h"
-	Discovery      DiscoveryConfig      `mapstructure:"discovery"`
-	Classification ClassificationConfig `mapstructure:"classification"`
 	Metrics        MetricsConfig        `mapstructure:"metrics"`
 }
 
@@ -27,6 +29,10 @@ type DiscoveryConfig struct {
 type SourceConfig struct {
 	Timeout           string   `mapstructure:"timeout"`
 	Scope             []string `mapstructure:"scope"`
+	Regions           []string `mapstructure:"regions"`
+	AssumeRole        string   `mapstructure:"assume_role"`
+	Project           string   `mapstructure:"project"`
+	SubscriptionID    string   `mapstructure:"subscription_id"`
 	TCPPorts          []int    `mapstructure:"tcp_ports"`
 	MaxConcurrent     int      `mapstructure:"max_concurrent"`
 	Enabled           bool     `mapstructure:"enabled"`
@@ -58,6 +64,32 @@ type MetricsConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 }
 
+// StreamingConfig configures the continuous streaming agent mode.
+type StreamingConfig struct {
+	Interval string     `mapstructure:"interval"` // duration string like "6h"
+	OTLP     OTLPConfig `mapstructure:"otlp"`
+}
+
+// OTLPConfig configures the OTLP event emitter.
+type OTLPConfig struct {
+	Endpoint string    `mapstructure:"endpoint"`
+	Protocol string    `mapstructure:"protocol"` // "grpc" or "http"
+	TLS      TLSConfig `mapstructure:"tls"`
+}
+
+// TLSConfig holds TLS certificate paths.
+type TLSConfig struct {
+	CertFile string `mapstructure:"cert_file"`
+	KeyFile  string `mapstructure:"key_file"`
+	CAFile   string `mapstructure:"ca_file"`
+	Enabled  bool   `mapstructure:"enabled"`
+}
+
+// PostgresConfig configures the PostgreSQL backend for streaming mode.
+type PostgresConfig struct {
+	DSN string `mapstructure:"dsn"`
+}
+
 // Load reads configuration from a YAML file at path, applies defaults, and
 // binds environment variables with the "KITE" prefix.  Environment variables
 // use underscores as separators (e.g. KITE_LOG_LEVEL).
@@ -69,8 +101,13 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("output_format", "table")
 	v.SetDefault("data_dir", "./data")
 	v.SetDefault("stale_threshold", "168h")
+	v.SetDefault("discovery.sources.agent.enabled", true)
+	v.SetDefault("discovery.sources.agent.collect_software", true)
+	v.SetDefault("discovery.sources.agent.collect_interfaces", true)
 	v.SetDefault("metrics.enabled", false)
 	v.SetDefault("metrics.listen", ":9090")
+	v.SetDefault("streaming.interval", "6h")
+	v.SetDefault("streaming.otlp.protocol", "grpc")
 
 	// Environment variable binding
 	v.SetEnvPrefix("KITE")
@@ -103,6 +140,19 @@ func (c *Config) StaleThresholdDuration() time.Duration {
 	d, err := time.ParseDuration(c.StaleThreshold)
 	if err != nil {
 		return 168 * time.Hour
+	}
+	return d
+}
+
+// StreamingInterval parses the Streaming.Interval string into a
+// time.Duration. Falls back to 6h if empty or invalid.
+func (c *Config) StreamingInterval() time.Duration {
+	if c.Streaming.Interval == "" {
+		return 6 * time.Hour
+	}
+	d, err := time.ParseDuration(c.Streaming.Interval)
+	if err != nil {
+		return 6 * time.Hour
 	}
 	return d
 }
