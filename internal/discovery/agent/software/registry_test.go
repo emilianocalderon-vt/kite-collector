@@ -152,33 +152,35 @@ func TestRegistry_Register(t *testing.T) {
 }
 
 func TestNewRegistry_ContainsAllCollectors(t *testing.T) {
-	r := NewRegistry()
-	require.Len(t, r.collectors, 18)
-
-	names := make([]string, len(r.collectors))
-	for i, c := range r.collectors {
-		names[i] = c.Name()
+	// RFC-0056 (18) + RFC-0058 OS (8) = 26 so far.
+	// Update this list when adding new collectors.
+	expected := []string{
+		// Phase 0 — Linux
+		"dpkg", "pacman", "rpm",
+		// Phase 1 — OS package managers
+		"brew", "apk", "chocolatey", "winget",
+		// Phase 2 — Universal + AUR
+		"snap", "flatpak", "scoop", "nix", "yay",
+		// Phase 2 — Language
+		"pip", "pipx", "npm", "pnpm", "gem", "cargo",
+		// Phase 3 — OS (RFC-0058)
+		"dnf", "zypper", "freebsdpkg", "portage",
+		"xbps", "opkg", "pkgsrc", "macports",
 	}
-	// Phase 0 — Linux
-	assert.Contains(t, names, "dpkg")
-	assert.Contains(t, names, "pacman")
-	assert.Contains(t, names, "rpm")
-	// Phase 1 — OS package managers
-	assert.Contains(t, names, "brew")
-	assert.Contains(t, names, "apk")
-	assert.Contains(t, names, "chocolatey")
-	assert.Contains(t, names, "winget")
-	// Phase 2 — Universal + AUR
-	assert.Contains(t, names, "snap")
-	assert.Contains(t, names, "flatpak")
-	assert.Contains(t, names, "scoop")
-	assert.Contains(t, names, "nix")
-	assert.Contains(t, names, "yay")
-	// Phase 2 — Language
-	assert.Contains(t, names, "pip")
-	assert.Contains(t, names, "pipx")
-	assert.Contains(t, names, "npm")
-	assert.Contains(t, names, "pnpm")
-	assert.Contains(t, names, "gem")
-	assert.Contains(t, names, "cargo")
+
+	r := NewRegistry()
+	require.Len(t, r.collectors, len(expected),
+		"NewRegistry() should return %d collectors (got %d). "+
+			"If you added a new collector, update this test and the expected list.",
+		len(expected), len(r.collectors))
+
+	names := make(map[string]bool, len(r.collectors))
+	for _, c := range r.collectors {
+		names[c.Name()] = true
+	}
+
+	for _, name := range expected {
+		assert.True(t, names[name],
+			"collector %q missing from NewRegistry()", name)
+	}
 }

@@ -40,6 +40,15 @@ func NewRegistry() *Registry {
 			NewPnpm(),
 			NewGem(),
 			NewCargo(),
+			// Phase 3 — OS (RFC-0058)
+			NewDnf(),
+			NewZypper(),
+			NewFreeBSDPkg(),
+			NewPortage(),
+			NewXbps(),
+			NewOpkg(),
+			NewPkgsrc(),
+			NewMacPorts(),
 		},
 	}
 }
