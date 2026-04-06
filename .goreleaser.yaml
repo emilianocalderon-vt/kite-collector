@@ -13,6 +13,9 @@ builds:
       - -X main.date={{.Date}}
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
 
 dockers:
   - image_templates:

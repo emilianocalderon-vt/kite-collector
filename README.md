@@ -221,7 +221,7 @@ make clean        # rm -rf bin/
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.26+
 - [golangci-lint](https://golangci-lint.run/usage/install/)
 - [gosec](https://github.com/securego/gosec) (for security scanning)
 
