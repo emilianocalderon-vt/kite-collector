@@ -597,3 +597,131 @@ func TestBuildEndpoint(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:8123", buildEndpoint("127.0.0.1", 8123, false))
 	assert.Equal(t, "https://192.168.1.1:8006", buildEndpoint("192.168.1.1", 8006, true))
 }
+
+// ---------------------------------------------------------------------------
+// Docker Compose label probe tests
+// ---------------------------------------------------------------------------
+
+func TestMatchComposeService(t *testing.T) {
+	sig := ServiceSignature{
+		Name:        "clickhouse",
+		DockerNames: []string{"clickhouse"},
+	}
+
+	assert.True(t, matchComposeService("clickhouse", sig))
+	assert.True(t, matchComposeService("Clickhouse", sig))
+	assert.False(t, matchComposeService("nginx", sig))
+}
+
+func TestProbeDockerComposeLabels_MockAPI(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "docker.sock")
+
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "unix", sockPath)
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	containers := []composeContainer{
+		{
+			ID:    "def456",
+			Image: "prom/prometheus:v2.50",
+			Names: []string{"/prometheus"},
+			Labels: map[string]string{
+				"com.docker.compose.service": "prometheus",
+				"com.docker.compose.project": "monitoring",
+			},
+			Ports: []dockerPortMapping{
+				{PrivatePort: 9090, PublicPort: 9090, IP: "0.0.0.0"},
+			},
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1.43/containers/json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(containers)
+	})
+
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(l) }()
+	defer func() { _ = srv.Close() }()
+
+	services := []ServiceSignature{
+		{
+			Name:         "prometheus",
+			DisplayName:  "Prometheus",
+			DefaultPorts: []int{9090},
+			DockerNames:  []string{"prometheus"},
+			SetupHint:    "Ready.",
+		},
+	}
+
+	results := probeDockerComposeLabels(context.Background(), sockPath, services)
+	require.Len(t, results, 1)
+	assert.Equal(t, "prometheus", results[0].Name)
+	assert.Equal(t, "docker_compose", results[0].Method)
+	assert.Contains(t, results[0].SetupHint, "compose:monitoring")
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes probe tests
+// ---------------------------------------------------------------------------
+
+func TestMatchK8sService(t *testing.T) {
+	sig := ServiceSignature{
+		Name:        "prometheus",
+		DockerNames: []string{"prometheus"},
+	}
+
+	assert.True(t, matchK8sService("prometheus", sig))
+	assert.True(t, matchK8sService("kube-prometheus", sig))
+	assert.False(t, matchK8sService("nginx", sig))
+}
+
+func TestK8sEndpoint(t *testing.T) {
+	svc := k8sService{
+		Metadata: k8sMetadata{Name: "clickhouse"},
+		Spec: k8sServiceSpec{
+			ClusterIP: "10.96.0.15",
+			Ports:     []k8sPortDef{{Port: 8123}},
+		},
+	}
+	sig := ServiceSignature{
+		DefaultPorts: []int{8123},
+	}
+
+	assert.Equal(t, "http://10.96.0.15:8123", k8sEndpoint(svc, sig))
+}
+
+func TestK8sEndpoint_NoClusterIP(t *testing.T) {
+	svc := k8sService{
+		Metadata: k8sMetadata{Name: "prometheus"},
+		Spec: k8sServiceSpec{
+			ClusterIP: "None",
+			Ports:     []k8sPortDef{{Port: 9090}},
+		},
+	}
+	sig := ServiceSignature{
+		DefaultPorts: []int{9090},
+	}
+
+	assert.Equal(t, "http://prometheus:9090", k8sEndpoint(svc, sig))
+}
+
+func TestProbeK8s_NotInCluster(t *testing.T) {
+	// Outside of Kubernetes, the token file doesn't exist.
+	results := probeK8s(context.Background(), KnownServices)
+	assert.Empty(t, results)
+}
+
+// ---------------------------------------------------------------------------
+// DNS probe tests
+// ---------------------------------------------------------------------------
+
+func TestProbeDNS_NoResolution(t *testing.T) {
+	// In a normal test environment, .local hostnames won't resolve.
+	// The probe should return empty without errors.
+	results := probeDNS(context.Background(), KnownServices, 500)
+	assert.Empty(t, results)
+}

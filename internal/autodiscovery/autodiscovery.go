@@ -113,11 +113,37 @@ func Run(ctx context.Context, opts Options) []DiscoveredService {
 		}()
 	}
 
+	// Docker Compose label probe.
+	if dockerSocket != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			discovered := probeDockerComposeLabels(ctx, dockerSocket, services)
+			collect(discovered)
+		}()
+	}
+
 	// Environment variable probe.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		discovered := probeEnvVars(services)
+		collect(discovered)
+	}()
+
+	// DNS/mDNS .local probe.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		discovered := probeDNS(ctx, services, opts.HTTPTimeout)
+		collect(discovered)
+	}()
+
+	// Kubernetes in-cluster probe.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		discovered := probeK8s(ctx, services)
 		collect(discovered)
 	}()
 
