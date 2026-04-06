@@ -281,7 +281,7 @@ func (u *UniFi) discoverLocal(ctx context.Context, cfg map[string]any) ([]model.
 
 	endpoint = strings.TrimRight(endpoint, "/")
 
-	slog.Info("unifi: using local API", "endpoint", endpoint, "site", site)
+	slog.Info("unifi: using local API", slog.String("endpoint", sanitizeLogValue(endpoint)), slog.String("site", sanitizeLogValue(site))) //#nosec G706 -- control chars sanitized; operator-configured values
 
 	client, err := newLocalClient(ctx, endpoint, username, password)
 	if err != nil {
@@ -312,7 +312,7 @@ func (u *UniFi) discoverLocal(ctx context.Context, cfg map[string]any) ([]model.
 		}
 	}
 
-	slog.Info("unifi: local discovery complete", slog.Int("assets", len(assets)))
+	slog.Info("unifi: local discovery complete", "assets", len(assets)) //#nosec G706 -- integer count, no injection vector
 	return assets, nil
 }
 
@@ -633,6 +633,16 @@ func toString(v any) string {
 		return s
 	}
 	return ""
+}
+
+// sanitizeLogValue replaces control characters to prevent log injection (CWE-117).
+func sanitizeLogValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, s)
 }
 
 func truncate(s string, n int) string {

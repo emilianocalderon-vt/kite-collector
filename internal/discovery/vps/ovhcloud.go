@@ -59,7 +59,7 @@ func (o *OVHcloud) Discover(ctx context.Context, cfg map[string]any) ([]model.As
 		}
 	}
 
-	slog.Info("ovhcloud: starting discovery", "region", region)
+	slog.Info("ovhcloud: starting discovery", "region", sanitizeLogValue(region)) //#nosec G706 -- control chars sanitized; operator-configured env var
 
 	auth := ovhAuth(appKey, appSecret, consumerKey)
 	client := newClient("ovhcloud", base, auth)

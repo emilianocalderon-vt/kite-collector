@@ -42,7 +42,7 @@ func (s *Scaleway) Discover(ctx context.Context, cfg map[string]any) ([]model.As
 		zone = "fr-par-1"
 	}
 
-	slog.Info("scaleway: starting discovery", "zone", zone)
+	slog.Info("scaleway: starting discovery", "zone", sanitizeLogValue(zone)) //#nosec G706 -- control chars sanitized; operator-configured env var
 
 	// Scaleway uses X-Auth-Token header instead of Authorization: Bearer.
 	client := newClient("scaleway", s.baseURL, func(req *http.Request) {
@@ -72,7 +72,7 @@ func (s *Scaleway) Discover(ctx context.Context, cfg map[string]any) ([]model.As
 		}
 	}
 
-	slog.Info("scaleway: discovery complete", "assets", len(assets))
+	slog.Info("scaleway: discovery complete", "assets", len(assets)) //#nosec G706 -- integer count, no injection vector
 	return assets, nil
 }
 

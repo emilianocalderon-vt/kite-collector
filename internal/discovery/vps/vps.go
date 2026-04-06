@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -206,6 +207,16 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// sanitizeLogValue replaces control characters to prevent log injection (CWE-117).
+func sanitizeLogValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, s)
 }
 
 // toJSON marshals v to a JSON string. Returns "{}" on error.
