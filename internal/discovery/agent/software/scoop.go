@@ -75,7 +75,11 @@ func ParseScoopOutput(raw string) *Result {
 		}
 
 		fields := strings.Fields(line)
-		if len(fields) <= versionIdx {
+		minLen := versionIdx
+		if nameIdx > minLen {
+			minLen = nameIdx
+		}
+		if len(fields) <= minLen {
 			result.Errs = append(result.Errs, CollectError{
 				Collector: "scoop",
 				Line:      lineNum,

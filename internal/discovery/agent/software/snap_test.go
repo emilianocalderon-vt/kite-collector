@@ -57,3 +57,12 @@ func TestParseSnapOutput_NoPublisherColumn(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	assert.Equal(t, "", result.Items[0].Vendor)
 }
+
+func TestParseSnapOutput_MissingNameColumn_ReturnsEmpty(t *testing.T) {
+	raw := "Pkg       Version    Rev\n" +
+		"code      1.90.0     155\n"
+	result := ParseSnapOutput(raw)
+
+	assert.Empty(t, result.Items)
+	assert.False(t, result.HasErrors())
+}

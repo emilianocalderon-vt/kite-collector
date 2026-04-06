@@ -55,7 +55,7 @@ func ParseSnapOutput(raw string) *Result {
 	versionIdx := colIdx["Version"]
 	publisherIdx := colIdx["Publisher"]
 
-	if versionIdx < 0 {
+	if nameIdx < 0 || versionIdx < 0 {
 		return result
 	}
 

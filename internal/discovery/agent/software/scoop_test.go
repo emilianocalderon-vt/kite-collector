@@ -50,3 +50,14 @@ func TestParseScoopOutput_MalformedLine_RecordsError(t *testing.T) {
 	require.Len(t, result.Errs, 1)
 	assert.Equal(t, "scoop", result.Errs[0].Collector)
 }
+
+func TestParseScoopOutput_TruncatedRow_RecordsError(t *testing.T) {
+	// Version column is at index 1; row has only 1 field
+	raw := "Name      Version  Source\n" +
+		"----      -------  ------\n" +
+		"onlyname\n"
+	result := ParseScoopOutput(raw)
+
+	assert.Empty(t, result.Items)
+	require.Len(t, result.Errs, 1)
+}
