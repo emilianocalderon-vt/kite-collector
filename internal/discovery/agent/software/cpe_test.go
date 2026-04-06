@@ -41,6 +41,34 @@ func TestBuildCPE23_StripsSpecialCharacters(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// BuildCPE23WithTargetSW
+// ---------------------------------------------------------------------------
+
+func TestBuildCPE23WithTargetSW_Python(t *testing.T) {
+	got := BuildCPE23WithTargetSW("", "requests", "2.31.0", "python")
+	assert.Equal(t, "cpe:2.3:a:*:requests:2.31.0:*:*:*:*:python:*:*", got)
+}
+
+func TestBuildCPE23WithTargetSW_NodeJS(t *testing.T) {
+	got := BuildCPE23WithTargetSW("", "typescript", "5.5.0", "node.js")
+	assert.Equal(t, "cpe:2.3:a:*:typescript:5.5.0:*:*:*:*:node.js:*:*", got)
+}
+
+// ---------------------------------------------------------------------------
+// BuildCPE23Full
+// ---------------------------------------------------------------------------
+
+func TestBuildCPE23Full_AllFields(t *testing.T) {
+	got := BuildCPE23Full("vendor", "product", "1.0", "python", "x86_64")
+	assert.Equal(t, "cpe:2.3:a:vendor:product:1.0:*:*:*:*:python:x86_64:*", got)
+}
+
+func TestBuildCPE23Full_EmptyOptionals(t *testing.T) {
+	got := BuildCPE23Full("v", "p", "1.0", "", "")
+	assert.Equal(t, "cpe:2.3:a:v:p:1.0:*:*:*:*:*:*:*", got)
+}
+
+// ---------------------------------------------------------------------------
 // normalizeComponent
 // ---------------------------------------------------------------------------
 

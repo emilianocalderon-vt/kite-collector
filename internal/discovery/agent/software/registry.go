@@ -26,6 +26,20 @@ func NewRegistry() *Registry {
 			NewAPK(),
 			NewChocolatey(),
 			NewWinget(),
+			// Phase 2 — Universal
+			NewSnap(),
+			NewFlatpak(),
+			NewScoop(),
+			NewNix(),
+			// Phase 2 — AUR
+			NewYay(),
+			// Phase 2 — Language
+			NewPip(),
+			NewPipx(),
+			NewNpm(),
+			NewPnpm(),
+			NewGem(),
+			NewCargo(),
 		},
 	}
 }
