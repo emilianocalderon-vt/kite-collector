@@ -153,7 +153,7 @@ func TestRegistry_Register(t *testing.T) {
 
 func TestNewRegistry_ContainsAllCollectors(t *testing.T) {
 	r := NewRegistry()
-	require.Len(t, r.collectors, 3)
+	require.Len(t, r.collectors, 7)
 
 	names := make([]string, len(r.collectors))
 	for i, c := range r.collectors {
@@ -162,4 +162,8 @@ func TestNewRegistry_ContainsAllCollectors(t *testing.T) {
 	assert.Contains(t, names, "dpkg")
 	assert.Contains(t, names, "pacman")
 	assert.Contains(t, names, "rpm")
+	assert.Contains(t, names, "brew")
+	assert.Contains(t, names, "apk")
+	assert.Contains(t, names, "chocolatey")
+	assert.Contains(t, names, "winget")
 }

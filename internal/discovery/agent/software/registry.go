@@ -17,9 +17,15 @@ type Registry struct {
 func NewRegistry() *Registry {
 	return &Registry{
 		collectors: []Collector{
+			// Linux
 			NewDpkg(),
 			NewPacman(),
 			NewRPM(),
+			// Phase 1 — OS package managers
+			NewBrew(),
+			NewAPK(),
+			NewChocolatey(),
+			NewWinget(),
 		},
 	}
 }
