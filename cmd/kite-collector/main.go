@@ -213,6 +213,12 @@ func runScan(cfgFile string, scope []string, output, dbPath string, sources []st
 	registry.Register(vps.NewHetzner())
 	registry.Register(vps.NewDigitalOcean())
 	registry.Register(vps.NewVultr())
+	registry.Register(vps.NewHostinger())
+	registry.Register(vps.NewLinode())
+	registry.Register(vps.NewScaleway())
+	registry.Register(vps.NewOVHcloud())
+	registry.Register(vps.NewUpCloud())
+	registry.Register(vps.NewKamatera())
 
 	// Set up metrics.
 	met := metrics.New()
@@ -650,6 +656,12 @@ func runAgent(cfgFile, dbPath, interval string, verbose, stream bool) error {
 	registry.Register(vps.NewHetzner())
 	registry.Register(vps.NewDigitalOcean())
 	registry.Register(vps.NewVultr())
+	registry.Register(vps.NewHostinger())
+	registry.Register(vps.NewLinode())
+	registry.Register(vps.NewScaleway())
+	registry.Register(vps.NewOVHcloud())
+	registry.Register(vps.NewUpCloud())
+	registry.Register(vps.NewKamatera())
 
 	met := metrics.New()
 	var metricsSrv *http.Server

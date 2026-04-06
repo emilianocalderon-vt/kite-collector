@@ -46,7 +46,47 @@ discovery:
       timeout: 5s
       max_concurrent: 32
 
-    # aws:                    # Phase 2
+    # VPS provider connectors
+    hetzner:
+      enabled: false
+      # Credentials: KITE_HETZNER_TOKEN
+
+    digitalocean:
+      enabled: false
+      # Credentials: KITE_DIGITALOCEAN_TOKEN
+
+    vultr:
+      enabled: false
+      # Credentials: KITE_VULTR_TOKEN
+
+    hostinger:
+      enabled: false
+      # Credentials: KITE_HOSTINGER_TOKEN
+
+    linode:
+      enabled: false
+      # Credentials: KITE_LINODE_TOKEN
+
+    scaleway:
+      enabled: false
+      # Credentials: KITE_SCALEWAY_SECRET_KEY
+      # Zone: KITE_SCALEWAY_ZONE (default: fr-par-1)
+
+    ovhcloud:
+      enabled: false
+      # Credentials: KITE_OVHCLOUD_APP_KEY, KITE_OVHCLOUD_APP_SECRET,
+      #              KITE_OVHCLOUD_CONSUMER_KEY
+      # Region: KITE_OVHCLOUD_REGION (default: eu)
+
+    upcloud:
+      enabled: false
+      # Credentials: KITE_UPCLOUD_USERNAME, KITE_UPCLOUD_PASSWORD
+
+    kamatera:
+      enabled: false
+      # Credentials: KITE_KAMATERA_CLIENT_ID, KITE_KAMATERA_SECRET
+
+    # aws:                    # Future
     #   enabled: false
     #   regions: [us-east-1, eu-west-1]
     #   assume_role: arn:aws:iam::123456789012:role/kite-reader

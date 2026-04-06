@@ -67,13 +67,13 @@ func newClient(name, base string, auth authFunc) *apiClient {
 // body into out. Transient errors are retried with exponential backoff.
 func (c *apiClient) get(ctx context.Context, path string, out any) error {
 	resp, err := c.doWithRetry(ctx, func() (*http.Response, error) {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil) //#nosec G704 -- base URL is hardcoded per provider
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		c.auth(req)
 		req.Header.Set("Accept", "application/json")
-		return c.http.Do(req)
+		return c.http.Do(req) //#nosec G704 -- request built from internal base URL
 	})
 	if err != nil {
 		return err
