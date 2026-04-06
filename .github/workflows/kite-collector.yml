@@ -101,6 +101,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [vet, lint, security, test]
+    if: "!startsWith(github.ref, 'refs/tags/v')"
     strategy:
       matrix:
         goos: [linux, darwin, windows]
