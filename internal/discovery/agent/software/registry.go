@@ -68,6 +68,11 @@ func NewRegistry() *Registry {
 			NewCRAN(),
 			NewJuliaPkg(),
 			NewCabal(),
+			// Phase 3 — Scientific / C++ (RFC-0058)
+			NewVcpkg(),
+			NewConan(),
+			NewSpack(),
+			NewGuix(),
 		},
 	}
 }
