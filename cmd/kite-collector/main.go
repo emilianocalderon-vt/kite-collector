@@ -245,15 +245,30 @@ func runScan(cfgFile string, scope []string, output, dbPath string, sources []st
 		result.TotalAssets, result.NewAssets, result.UpdatedAssets,
 		result.StaleAssets, result.EventsEmitted)
 
-	// Output asset list.
+	// Output asset list with software.
 	assets, err := st.ListAssets(ctx, store.AssetFilter{})
 	if err != nil {
 		return fmt.Errorf("list assets: %w", err)
 	}
 
+	type assetWithSoftware struct {
+		Software []model.InstalledSoftware `json:"software,omitempty"`
+		model.Asset
+	}
+
+	enriched := make([]assetWithSoftware, 0, len(assets))
+	for _, a := range assets {
+		entry := assetWithSoftware{Asset: a}
+		sw, swErr := st.ListSoftware(ctx, a.ID)
+		if swErr == nil && len(sw) > 0 {
+			entry.Software = sw
+		}
+		enriched = append(enriched, entry)
+	}
+
 	switch strings.ToLower(output) {
 	case "json":
-		return formatJSON(assets)
+		return formatJSON(enriched)
 	case "csv":
 		formatCSV(assets)
 	default:

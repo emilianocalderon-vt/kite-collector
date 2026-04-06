@@ -55,11 +55,6 @@ func (az *Azure) Discover(ctx context.Context, cfg map[string]any) ([]model.Asse
 		subscriptionID = creds.subscriptionID
 	}
 
-	if subscriptionID == "" {
-		slog.Warn("azure_vm: no subscription_id in config or AZURE_SUBSCRIPTION_ID env, skipping discovery")
-		return nil, nil
-	}
-
 	if creds.tenantID == "" || creds.clientID == "" || creds.clientSecret == "" {
 		slog.Warn("azure_vm: AZURE_TENANT_ID, AZURE_CLIENT_ID, or AZURE_CLIENT_SECRET not set, skipping discovery")
 		return nil, nil
@@ -73,9 +68,27 @@ func (az *Azure) Discover(ctx context.Context, cfg map[string]any) ([]model.Asse
 		return nil, nil
 	}
 
-	vms, err := az.listVirtualMachines(ctx, subscriptionID, token)
-	if err != nil {
-		return nil, fmt.Errorf("azure_vm: listing VMs: %w", err)
+	// Determine which subscriptions to enumerate.
+	var subscriptionIDs []string
+	if subscriptionID != "" {
+		subscriptionIDs = []string{subscriptionID}
+	} else {
+		// When no subscription is configured, enumerate all accessible
+		// subscriptions via the ARM Subscriptions API.
+		slog.Info("azure_vm: no subscription_id configured, enumerating subscriptions")
+		enumerated, enumErr := az.listSubscriptions(ctx, token)
+		if enumErr != nil {
+			slog.Warn("azure_vm: failed to enumerate subscriptions, skipping discovery",
+				"error", enumErr,
+			)
+			return nil, nil
+		}
+		if len(enumerated) == 0 {
+			slog.Warn("azure_vm: no accessible subscriptions found, skipping discovery")
+			return nil, nil
+		}
+		subscriptionIDs = enumerated
+		slog.Info("azure_vm: discovered subscriptions", "count", len(subscriptionIDs))
 	}
 
 	// Build region filter set. An empty set means all regions are accepted.
@@ -87,33 +100,47 @@ func (az *Azure) Discover(ctx context.Context, cfg map[string]any) ([]model.Asse
 	now := time.Now().UTC()
 	var assets []model.Asset
 
-	for _, vm := range vms {
-		if len(regionSet) > 0 && !regionSet[strings.ToLower(vm.location)] {
+	for _, subID := range subscriptionIDs {
+		if ctx.Err() != nil {
+			return assets, ctx.Err()
+		}
+
+		slog.Info("azure_vm: listing VMs for subscription", "subscription_id", subID)
+
+		vms, vmErr := az.listVirtualMachines(ctx, subID, token)
+		if vmErr != nil {
+			slog.Error("azure_vm: failed to list VMs, returning partial results",
+				"subscription_id", subID,
+				"error", vmErr,
+			)
 			continue
 		}
 
-		osFamily := deriveAzureOSFamily(vm)
+		for _, vm := range vms {
+			if len(regionSet) > 0 && !regionSet[strings.ToLower(vm.location)] {
+				continue
+			}
 
-		asset := model.Asset{
-			ID:              uuid.Must(uuid.NewV7()),
-			AssetType:       model.AssetTypeCloudInstance,
-			Hostname:        vm.name,
-			OSFamily:        osFamily,
-			DiscoverySource: "azure_vm",
-			FirstSeenAt:     now,
-			LastSeenAt:      now,
-			IsAuthorized:    model.AuthorizationUnknown,
-			IsManaged:       model.ManagedUnknown,
-			Environment:     vm.location,
+			osFamily := deriveAzureOSFamily(vm)
+
+			asset := model.Asset{
+				ID:              uuid.Must(uuid.NewV7()),
+				AssetType:       model.AssetTypeCloudInstance,
+				Hostname:        vm.name,
+				OSFamily:        osFamily,
+				DiscoverySource: "azure_vm",
+				FirstSeenAt:     now,
+				LastSeenAt:      now,
+				IsAuthorized:    model.AuthorizationUnknown,
+				IsManaged:       model.ManagedUnknown,
+				Environment:     vm.location,
+			}
+			asset.ComputeNaturalKey()
+			assets = append(assets, asset)
 		}
-		asset.ComputeNaturalKey()
-		assets = append(assets, asset)
 	}
 
-	slog.Info("azure_vm: discovery complete",
-		"total_vms", len(vms),
-		"matched_assets", len(assets),
-	)
+	slog.Info("azure_vm: discovery complete", "total_assets", len(assets))
 	return assets, nil
 }
 
@@ -159,29 +186,25 @@ func (az *Azure) acquireToken(ctx context.Context, creds azureCredentials) (stri
 		"client_secret": {creds.clientSecret},
 		"scope":         {"https://management.azure.com/.default"},
 	}
+	formBody := form.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
-		strings.NewReader(form.Encode()),
-	)
+	resp, err := doWithRetry(ctx, "azure_vm", func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
+			strings.NewReader(formBody))
+		if reqErr != nil {
+			return nil, fmt.Errorf("creating token request: %w", reqErr)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return http.DefaultClient.Do(req)
+	})
 	if err != nil {
-		return "", fmt.Errorf("creating token request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("executing token request: %w", err)
+		return "", fmt.Errorf("token exchange: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("reading token response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token endpoint returned %d: %s",
-			resp.StatusCode, truncateBytes(body, 300))
 	}
 
 	var tokenResp struct {
@@ -243,29 +266,26 @@ func (az *Azure) listVirtualMachines(ctx context.Context, subscriptionID, token 
 }
 
 // fetchVMPage fetches a single page of the VM list response and returns
-// parsed VMs plus the nextLink URL (empty if no more pages).
+// parsed VMs plus the nextLink URL (empty if no more pages). The HTTP call
+// is wrapped with retry logic.
 func (az *Azure) fetchVMPage(ctx context.Context, apiURL, token string) ([]azureVM, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	resp, err := doWithRetry(ctx, "azure_vm", func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if reqErr != nil {
+			return nil, fmt.Errorf("creating request: %w", reqErr)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		return http.DefaultClient.Do(req)
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("executing request: %w", err)
+		return nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("ARM API returned %d: %s",
-			resp.StatusCode, truncateBytes(body, 500))
 	}
 
 	var result struct {
@@ -278,15 +298,69 @@ func (az *Azure) fetchVMPage(ctx context.Context, apiURL, token string) ([]azure
 
 	var vms []azureVM
 	for _, raw := range result.Value {
-		vm, err := parseAzureVM(raw)
-		if err != nil {
-			slog.Debug("azure_vm: skipping unparseable VM entry", "error", err)
+		vm, vmErr := parseAzureVM(raw)
+		if vmErr != nil {
+			slog.Debug("azure_vm: skipping unparseable VM entry", "error", vmErr)
 			continue
 		}
 		vms = append(vms, vm)
 	}
 
 	return vms, result.NextLink, nil
+}
+
+// listSubscriptions enumerates all Azure subscriptions accessible to the
+// authenticated service principal, returning their subscription IDs.
+func (az *Azure) listSubscriptions(ctx context.Context, token string) ([]string, error) {
+	apiURL := "https://management.azure.com/subscriptions?api-version=2022-12-01"
+
+	var allIDs []string
+
+	for apiURL != "" {
+		if ctx.Err() != nil {
+			return allIDs, ctx.Err()
+		}
+
+		resp, err := doWithRetry(ctx, "azure_vm", func() (*http.Response, error) {
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+			if reqErr != nil {
+				return nil, reqErr
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Accept", "application/json")
+			return http.DefaultClient.Do(req)
+		})
+		if err != nil {
+			return allIDs, fmt.Errorf("listing subscriptions: %w", err)
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return allIDs, fmt.Errorf("reading subscriptions response: %w", readErr)
+		}
+
+		var result struct {
+			NextLink string `json:"nextLink"`
+			Value    []struct {
+				SubscriptionID string `json:"subscriptionId"`
+				State          string `json:"state"`
+			} `json:"value"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return allIDs, fmt.Errorf("parsing subscriptions response: %w", err)
+		}
+
+		for _, sub := range result.Value {
+			if strings.EqualFold(sub.State, "Enabled") {
+				allIDs = append(allIDs, sub.SubscriptionID)
+			}
+		}
+
+		apiURL = result.NextLink
+	}
+
+	return allIDs, nil
 }
 
 // parseAzureVM extracts the fields we need from a single VM JSON object.

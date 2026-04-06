@@ -38,6 +38,10 @@ func (a *AWS) Name() string { return "aws_ec2" }
 // If credentials are not available, the method logs a warning and returns nil
 // (graceful degradation).
 //
+// When assume_role is set, STS AssumeRole is called first to obtain temporary
+// credentials for cross-account access. The source identity credentials must
+// have sts:AssumeRole permission on the target role ARN.
+//
 // Supported config keys:
 //
 //	regions     – []any of AWS region strings (e.g. ["us-east-1", "eu-west-1"])
@@ -51,14 +55,30 @@ func (a *AWS) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset, 
 		"assume_role_set", role != "",
 	)
 
-	if role != "" {
-		slog.Warn("aws_ec2: assume_role requires STS and is not supported in direct-HTTP mode, skipping role assumption")
-	}
-
 	creds := loadAWSCredentials()
 	if creds.accessKey == "" || creds.secretKey == "" {
 		slog.Warn("aws_ec2: AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not set, skipping discovery")
 		return nil, nil
+	}
+
+	// AssumeRole for cross-account access when configured.
+	if role != "" {
+		slog.Info("aws_ec2: assuming role via STS", "role_arn", role)
+		stsRegion := creds.region
+		if stsRegion == "" {
+			stsRegion = "us-east-1"
+		}
+		assumed, err := a.assumeRole(ctx, creds, stsRegion, role)
+		if err != nil {
+			slog.Error("aws_ec2: AssumeRole failed, falling back to source credentials",
+				"role_arn", role,
+				"error", err,
+			)
+			// Graceful degradation: continue with source credentials.
+		} else {
+			creds = assumed
+			slog.Info("aws_ec2: using assumed role credentials")
+		}
 	}
 
 	if len(regions) == 0 {
@@ -81,7 +101,7 @@ func (a *AWS) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset, 
 
 		instances, err := a.describeInstances(ctx, creds, region)
 		if err != nil {
-			slog.Error("aws_ec2: DescribeInstances failed",
+			slog.Error("aws_ec2: DescribeInstances failed, returning partial results",
 				"region", region,
 				"error", err,
 			)
@@ -153,7 +173,8 @@ type ec2Instance struct {
 }
 
 // describeInstances calls the EC2 DescribeInstances API for the given region
-// and returns parsed instance records.
+// and returns parsed instance records. The call is wrapped with retry logic
+// for transient failures.
 func (a *AWS) describeInstances(ctx context.Context, creds awsCredentials, region string) ([]ec2Instance, error) {
 	endpoint := fmt.Sprintf("https://ec2.%s.amazonaws.com/", region)
 
@@ -166,20 +187,20 @@ func (a *AWS) describeInstances(ctx context.Context, creds awsCredentials, regio
 
 	body := params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	resp, err := doWithRetry(ctx, "aws_ec2", func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+		if reqErr != nil {
+			return nil, fmt.Errorf("creating request: %w", reqErr)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+
+		if signErr := signV4(req, []byte(body), creds, region, "ec2"); signErr != nil {
+			return nil, fmt.Errorf("signing request: %w", signErr)
+		}
+		return http.DefaultClient.Do(req)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
-
-	if signErr := signV4(req, []byte(body), creds, region, "ec2"); signErr != nil {
-		return nil, fmt.Errorf("signing request: %w", signErr)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -188,11 +209,76 @@ func (a *AWS) describeInstances(ctx context.Context, creds awsCredentials, regio
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("EC2 API returned %d: %s", resp.StatusCode, truncate(string(respBody), 500))
+	return parseDescribeInstancesResponse(respBody)
+}
+
+// ---------------------------------------------------------------------------
+// AWS STS AssumeRole
+// ---------------------------------------------------------------------------
+
+// stsAssumeRoleResponse holds the fields parsed from an STS AssumeRole XML
+// response.
+type stsAssumeRoleResponse struct {
+	XMLName     xml.Name `xml:"AssumeRoleResponse"`
+	Credentials struct {
+		AccessKeyID     string `xml:"AccessKeyId"`
+		SecretAccessKey string `xml:"SecretAccessKey"`
+		SessionToken    string `xml:"SessionToken"`
+	} `xml:"AssumeRoleResult>Credentials"`
+}
+
+// assumeRole calls the STS AssumeRole API and returns temporary credentials.
+// The source credentials must have sts:AssumeRole permission on the given
+// roleARN.
+func (a *AWS) assumeRole(ctx context.Context, creds awsCredentials, region, roleARN string) (awsCredentials, error) {
+	endpoint := fmt.Sprintf("https://sts.%s.amazonaws.com/", region)
+
+	params := url.Values{}
+	params.Set("Action", "AssumeRole")
+	params.Set("Version", "2011-06-15")
+	params.Set("RoleArn", roleARN)
+	params.Set("RoleSessionName", "kite-collector")
+	params.Set("DurationSeconds", "3600")
+
+	body := params.Encode()
+
+	resp, err := doWithRetry(ctx, "aws_sts", func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+		if reqErr != nil {
+			return nil, fmt.Errorf("creating request: %w", reqErr)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+
+		if signErr := signV4(req, []byte(body), creds, region, "sts"); signErr != nil {
+			return nil, fmt.Errorf("signing request: %w", signErr)
+		}
+		return http.DefaultClient.Do(req)
+	})
+	if err != nil {
+		return awsCredentials{}, fmt.Errorf("STS AssumeRole: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return awsCredentials{}, fmt.Errorf("reading STS response: %w", err)
 	}
 
-	return parseDescribeInstancesResponse(respBody)
+	var stsResp stsAssumeRoleResponse
+	if err := xml.Unmarshal(respBody, &stsResp); err != nil {
+		return awsCredentials{}, fmt.Errorf("parsing STS response: %w", err)
+	}
+
+	if stsResp.Credentials.AccessKeyID == "" {
+		return awsCredentials{}, fmt.Errorf("STS AssumeRole returned empty credentials")
+	}
+
+	return awsCredentials{
+		accessKey:    stsResp.Credentials.AccessKeyID,
+		secretKey:    stsResp.Credentials.SecretAccessKey,
+		sessionToken: stsResp.Credentials.SessionToken,
+		region:       region,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -87,7 +87,9 @@ func (g *GCP) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset, 
 			}
 		}
 
-		osFamily := guessOSFromDisks(inst.disks)
+		// Enrich OS from boot disk source image when possible, falling
+		// back to the disk URL heuristic.
+		osFamily := g.enrichOSFromDisk(ctx, inst, token)
 
 		asset := model.Asset{
 			ID:              uuid.Must(uuid.NewV7()),
@@ -266,7 +268,8 @@ type gcpInstance struct {
 
 // gcpDisk holds minimal disk metadata for OS detection.
 type gcpDisk struct {
-	source string // source image URL
+	source string // disk self-link URL
+	boot   bool   // true for the boot disk
 }
 
 // listAggregatedInstances calls the Compute Engine aggregatedList API and
@@ -297,28 +300,25 @@ func (g *GCP) listAggregatedInstances(ctx context.Context, project, token string
 
 // fetchInstancePage fetches a single page of the aggregated instances
 // response and returns parsed instances plus the next page URL (empty if
-// no more pages).
+// no more pages). The HTTP call is wrapped with retry logic.
 func (g *GCP) fetchInstancePage(ctx context.Context, apiURL, token string) ([]gcpInstance, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	resp, err := doWithRetry(ctx, "gcp_compute", func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if reqErr != nil {
+			return nil, fmt.Errorf("creating request: %w", reqErr)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		return http.DefaultClient.Do(req)
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("executing request: %w", err)
+		return nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("compute API returned %d: %s", resp.StatusCode, truncateBytes(body, 500))
 	}
 
 	var result struct {
@@ -337,6 +337,7 @@ func (g *GCP) fetchInstancePage(ctx context.Context, apiURL, token string) ([]gc
 				Zone  string `json:"zone"`
 				Disks []struct {
 					Source string `json:"source"`
+					Boot   bool   `json:"boot"`
 				} `json:"disks"`
 			} `json:"instances"`
 		}
@@ -349,7 +350,7 @@ func (g *GCP) fetchInstancePage(ctx context.Context, apiURL, token string) ([]gc
 				zone: inst.Zone,
 			}
 			for _, d := range inst.Disks {
-				gi.disks = append(gi.disks, gcpDisk{source: d.Source})
+				gi.disks = append(gi.disks, gcpDisk{source: d.Source, boot: d.Boot})
 			}
 			instances = append(instances, gi)
 		}
@@ -368,6 +369,70 @@ func (g *GCP) fetchInstancePage(ctx context.Context, apiURL, token string) ([]gc
 	}
 
 	return instances, nextURL, nil
+}
+
+// fetchDiskSourceImage retrieves the sourceImage field from a Compute Engine
+// disk resource. The diskURL is the full self-link URL of the disk.
+func (g *GCP) fetchDiskSourceImage(ctx context.Context, diskURL, token string) string {
+	resp, err := doWithRetry(ctx, "gcp_compute", func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, diskURL, nil)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		return http.DefaultClient.Do(req)
+	})
+	if err != nil {
+		slog.Debug("gcp_compute: failed to fetch disk resource", "url", diskURL, "error", err)
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	var disk struct {
+		SourceImage string `json:"sourceImage"`
+	}
+	if err := json.Unmarshal(body, &disk); err != nil {
+		return ""
+	}
+	return disk.SourceImage
+}
+
+// enrichOSFromDisk fetches the boot disk's sourceImage to determine the OS
+// family more accurately than the disk source URL heuristic alone.
+func (g *GCP) enrichOSFromDisk(ctx context.Context, inst gcpInstance, token string) string {
+	// Find the boot disk.
+	var bootDiskURL string
+	for _, d := range inst.disks {
+		if d.boot && d.source != "" {
+			bootDiskURL = d.source
+			break
+		}
+	}
+	if bootDiskURL == "" && len(inst.disks) > 0 {
+		bootDiskURL = inst.disks[0].source
+	}
+	if bootDiskURL == "" {
+		return "linux" // default assumption
+	}
+
+	// Ensure the URL is a full API URL.
+	if !strings.HasPrefix(bootDiskURL, "https://") {
+		bootDiskURL = "https://compute.googleapis.com/compute/v1/" + bootDiskURL
+	}
+
+	sourceImage := g.fetchDiskSourceImage(ctx, bootDiskURL, token)
+	if sourceImage != "" {
+		return osFromSourceImage(sourceImage)
+	}
+
+	// Fall back to the source URL heuristic.
+	return guessOSFromDisks(inst.disks)
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +456,34 @@ func regionFromZone(zone string) string {
 		}
 	}
 	return zone
+}
+
+// osFromSourceImage parses a GCP source image URL or name to determine the
+// OS family. Source image URLs look like:
+//
+//	projects/debian-cloud/global/images/debian-11-bullseye-v20230615
+//	projects/windows-cloud/global/images/windows-server-2022-dc-v20230615
+//	projects/cos-cloud/global/images/cos-stable-109-17800-0-0
+func osFromSourceImage(sourceImage string) string {
+	src := strings.ToLower(sourceImage)
+	switch {
+	case strings.Contains(src, "windows"):
+		return "windows"
+	case strings.Contains(src, "debian"),
+		strings.Contains(src, "ubuntu"),
+		strings.Contains(src, "rhel"),
+		strings.Contains(src, "red-hat"),
+		strings.Contains(src, "centos"),
+		strings.Contains(src, "suse"),
+		strings.Contains(src, "sles"),
+		strings.Contains(src, "cos"),
+		strings.Contains(src, "container-optimized"),
+		strings.Contains(src, "fedora"),
+		strings.Contains(src, "rocky"),
+		strings.Contains(src, "alma"):
+		return "linux"
+	}
+	return "linux" // default
 }
 
 // guessOSFromDisks inspects disk source image URLs for OS hints.
