@@ -84,6 +84,10 @@ func (e *Engine) Run(ctx context.Context, cfg *config.Config) (*model.ScanResult
 			"max_concurrent":     src.MaxConcurrent,
 			"collect_software":   src.CollectSoftware,
 			"collect_interfaces": src.CollectInterfaces,
+			"host":              src.Host,
+			"endpoint":          src.Endpoint,
+			"site":              src.Site,
+			"community":         src.Community,
 		}
 		configs[name] = m
 	}

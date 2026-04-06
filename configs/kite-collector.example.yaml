@@ -22,6 +22,30 @@ discovery:
       collect_software: true
       collect_interfaces: true
 
+    # Vendor API connectors
+    docker:
+      enabled: true
+      host: unix:///var/run/docker.sock  # or tcp://host:2376
+      # Credentials: KITE_DOCKER_HOST (overrides host)
+
+    unifi:
+      enabled: false
+      endpoint: https://192.168.1.1:8443
+      site: default
+      # Credentials: KITE_UNIFI_USERNAME, KITE_UNIFI_PASSWORD
+
+    proxmox:
+      enabled: false
+      endpoint: https://pve.local:8006
+      # Credentials: KITE_PROXMOX_TOKEN_ID, KITE_PROXMOX_TOKEN_SECRET
+
+    snmp:
+      enabled: false
+      community: public
+      scope: [192.168.1.0/24]
+      timeout: 5s
+      max_concurrent: 32
+
     # aws:                    # Phase 2
     #   enabled: false
     #   regions: [us-east-1, eu-west-1]

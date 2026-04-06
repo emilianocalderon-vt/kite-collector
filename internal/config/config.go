@@ -38,6 +38,10 @@ type SourceConfig struct {
 	AssumeRole        string   `mapstructure:"assume_role"`
 	Project           string   `mapstructure:"project"`
 	SubscriptionID    string   `mapstructure:"subscription_id"`
+	Host              string   `mapstructure:"host"`              // Docker/Podman socket path
+	Endpoint          string   `mapstructure:"endpoint"`          // API endpoint URL (UniFi, Proxmox)
+	Site              string   `mapstructure:"site"`              // UniFi site name
+	Community         string   `mapstructure:"community"`         // SNMP v2c community string
 	TCPPorts          []int    `mapstructure:"tcp_ports"`
 	MaxConcurrent     int      `mapstructure:"max_concurrent"`
 	Enabled           bool     `mapstructure:"enabled"`
