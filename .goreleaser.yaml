@@ -17,14 +17,6 @@ builds:
       - goos: windows
         goarch: arm64
 
-dockers:
-  - image_templates:
-      - "ghcr.io/vulnertrack/kite-collector:{{ .Tag }}"
-      - "ghcr.io/vulnertrack/kite-collector:latest"
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - "--platform=linux/amd64"
-
 checksum:
   name_template: "checksums.txt"
 

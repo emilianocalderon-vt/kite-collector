@@ -129,52 +129,7 @@ jobs:
           retention-days: 30
 
   # ──────────────────────────────────────────────
-  # Phase 3: Container Image (main push only)
-  # ──────────────────────────────────────────────
-
-  container:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      packages: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/kite-collector
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=sha-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Trivy image scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/kite-collector:latest
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
-
-  # ──────────────────────────────────────────────
-  # Phase 4: Release (v* tags only)
+  # Phase 3: Release (v* tags only)
   # ──────────────────────────────────────────────
 
   release:
@@ -183,7 +138,6 @@ jobs:
     needs: [vet, lint, security, test]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      packages: write
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -192,11 +146,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
