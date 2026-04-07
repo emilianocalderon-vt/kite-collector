@@ -1,5 +1,4 @@
--- migrations/sqlite/001_initial.sql
--- kite-collector asset discovery schema
+-- 001_initial.sql: core asset discovery schema
 
 CREATE TABLE IF NOT EXISTS assets (
     id               TEXT PRIMARY KEY,
@@ -7,6 +6,8 @@ CREATE TABLE IF NOT EXISTS assets (
     hostname         TEXT NOT NULL,
     os_family        TEXT,
     os_version       TEXT,
+    kernel_version   TEXT,
+    architecture     TEXT,
     is_authorized    TEXT NOT NULL DEFAULT 'unknown' CHECK(is_authorized IN ('unknown','authorized','unauthorized')),
     is_managed       TEXT NOT NULL DEFAULT 'unknown' CHECK(is_managed IN ('unknown','managed','unmanaged')),
     environment      TEXT,
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS assets (
     first_seen_at    TEXT NOT NULL,
     last_seen_at     TEXT NOT NULL,
     tags             TEXT,
+    natural_key      TEXT,
     UNIQUE(hostname, asset_type)
 );
 
@@ -37,21 +39,23 @@ CREATE TABLE IF NOT EXISTS installed_software (
     vendor          TEXT NOT NULL DEFAULT '',
     version         TEXT NOT NULL,
     cpe23           TEXT,
-    package_manager TEXT
+    package_manager TEXT,
+    architecture    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS scan_runs (
-    id               TEXT PRIMARY KEY,
-    started_at       TEXT NOT NULL,
-    completed_at     TEXT,
-    status           TEXT NOT NULL DEFAULT 'running',
-    total_assets     INTEGER DEFAULT 0,
-    new_assets       INTEGER DEFAULT 0,
-    updated_assets   INTEGER DEFAULT 0,
-    stale_assets     INTEGER DEFAULT 0,
-    coverage_percent REAL DEFAULT 0.0,
-    error_count      INTEGER DEFAULT 0,
-    scope_config     TEXT
+    id                TEXT PRIMARY KEY,
+    started_at        TEXT NOT NULL,
+    completed_at      TEXT,
+    status            TEXT NOT NULL DEFAULT 'running',
+    total_assets      INTEGER DEFAULT 0,
+    new_assets        INTEGER DEFAULT 0,
+    updated_assets    INTEGER DEFAULT 0,
+    stale_assets      INTEGER DEFAULT 0,
+    coverage_percent  REAL DEFAULT 0.0,
+    error_count       INTEGER DEFAULT 0,
+    scope_config      TEXT,
+    discovery_sources TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -64,10 +68,10 @@ CREATE TABLE IF NOT EXISTS events (
     timestamp   TEXT NOT NULL
 );
 
--- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_assets_hostname ON assets(hostname);
 CREATE INDEX IF NOT EXISTS idx_assets_last_seen ON assets(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_assets_authorized ON assets(is_authorized);
+CREATE INDEX IF NOT EXISTS idx_assets_natural_key ON assets(natural_key);
 CREATE INDEX IF NOT EXISTS idx_interfaces_ip ON network_interfaces(ip_address);
 CREATE INDEX IF NOT EXISTS idx_interfaces_mac ON network_interfaces(mac_address);
 CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, timestamp);

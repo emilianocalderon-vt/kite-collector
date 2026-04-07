@@ -39,15 +39,6 @@ func New(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
-// Migrate creates the schema tables and indexes if they do not already exist.
-func (s *SQLiteStore) Migrate(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, schema)
-	if err != nil {
-		return fmt.Errorf("sqlite migrate: %w", err)
-	}
-	return nil
-}
-
 // Close releases the underlying database connection pool.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
