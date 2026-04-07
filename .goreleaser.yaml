@@ -20,7 +20,7 @@ builds:
 # Flat binary distribution — single file download, no tar.gz.
 archives:
   - id: flat
-    format: binary
+    formats: [binary]
     name_template: "kite-collector_{{ .Os }}_{{ .Arch }}"
 
 checksum:
