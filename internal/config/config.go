@@ -16,6 +16,7 @@ type Config struct {
 	Classification ClassificationConfig `mapstructure:"classification"`
 	Streaming      StreamingConfig      `mapstructure:"streaming"`
 	Postgres       PostgresConfig       `mapstructure:"postgres"`
+	Safety         SafetyConfig         `mapstructure:"safety"`
 	LogLevel       string               `mapstructure:"log_level"`
 	OutputFormat   string               `mapstructure:"output_format"`
 	DataDir        string               `mapstructure:"data_dir"`
@@ -23,6 +24,47 @@ type Config struct {
 	Metrics        MetricsConfig        `mapstructure:"metrics"`
 	Audit          AuditConfig          `mapstructure:"audit"`
 	Posture        PostureConfig        `mapstructure:"posture"`
+}
+
+// SafetyConfig holds runtime safety settings.
+type SafetyConfig struct {
+	ScanDeadline     string               `mapstructure:"scan_deadline"`      // duration like "30m"
+	MaxResponseBytes int64                `mapstructure:"max_response_bytes"` // 0 = unlimited
+	MaxRequestBytes  int64                `mapstructure:"max_request_bytes"`
+	CircuitBreaker   CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+}
+
+// CircuitBreakerConfig configures the per-source circuit breaker.
+type CircuitBreakerConfig struct {
+	FailureThreshold int    `mapstructure:"failure_threshold"`
+	Cooldown         string `mapstructure:"cooldown"` // duration like "5m"
+	SuccessThreshold int    `mapstructure:"success_threshold"`
+}
+
+// ScanDeadlineDuration parses the Safety.ScanDeadline string. Falls back
+// to 30 minutes if empty or invalid.
+func (c *Config) ScanDeadlineDuration() time.Duration {
+	if c.Safety.ScanDeadline == "" {
+		return 30 * time.Minute
+	}
+	d, err := time.ParseDuration(c.Safety.ScanDeadline)
+	if err != nil {
+		return 30 * time.Minute
+	}
+	return d
+}
+
+// CircuitBreakerCooldown parses the cooldown duration string. Falls back
+// to 5 minutes if empty or invalid.
+func (c *Config) CircuitBreakerCooldown() time.Duration {
+	if c.Safety.CircuitBreaker.Cooldown == "" {
+		return 5 * time.Minute
+	}
+	d, err := time.ParseDuration(c.Safety.CircuitBreaker.Cooldown)
+	if err != nil {
+		return 5 * time.Minute
+	}
+	return d
 }
 
 // DiscoveryConfig holds configuration for all discovery sources.
@@ -166,6 +208,12 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("posture.enabled", true)
 	v.SetDefault("streaming.interval", "6h")
 	v.SetDefault("streaming.otlp.protocol", "grpc")
+	v.SetDefault("safety.scan_deadline", "30m")
+	v.SetDefault("safety.max_response_bytes", 10485760) // 10 MB
+	v.SetDefault("safety.max_request_bytes", 1048576)   // 1 MB
+	v.SetDefault("safety.circuit_breaker.failure_threshold", 3)
+	v.SetDefault("safety.circuit_breaker.cooldown", "5m")
+	v.SetDefault("safety.circuit_breaker.success_threshold", 1)
 
 	// Environment variable binding
 	v.SetEnvPrefix("KITE")

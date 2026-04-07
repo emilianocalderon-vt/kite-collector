@@ -60,11 +60,11 @@ func TestFormat_ContainsAllFields(t *testing.T) {
 	assert.Contains(t, formatted, runtime.GOOS)
 }
 
-func TestCodes_Returns10(t *testing.T) {
+func TestCodes_ReturnsAll(t *testing.T) {
 	codes := Codes()
-	assert.Len(t, codes, 10)
+	assert.Len(t, codes, len(Catalog))
 	assert.Equal(t, "KITE-E001", codes[0])
-	assert.Equal(t, "KITE-E010", codes[9])
+	assert.Equal(t, "KITE-E015", codes[len(codes)-1])
 }
 
 func TestCodes_Sorted(t *testing.T) {

@@ -78,4 +78,5 @@ const (
 	ScanStatusRunning   ScanStatus = "running"
 	ScanStatusCompleted ScanStatus = "completed"
 	ScanStatusFailed    ScanStatus = "failed"
+	ScanStatusTimedOut  ScanStatus = "timed_out"
 )

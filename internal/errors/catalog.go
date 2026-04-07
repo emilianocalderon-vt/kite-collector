@@ -6,6 +6,7 @@ package errors
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -59,14 +60,7 @@ func Codes() []string {
 	for code := range Catalog {
 		codes = append(codes, code)
 	}
-	// Simple sort — codes are lexicographically ordered by design.
-	for i := range codes {
-		for j := i + 1; j < len(codes); j++ {
-			if codes[j] < codes[i] {
-				codes[i], codes[j] = codes[j], codes[i]
-			}
-		}
-	}
+	slices.Sort(codes)
 	return codes
 }
 
@@ -160,6 +154,46 @@ var Catalog = map[string]KiteError{
 		Cause:   "The SQLite schema migration could not be applied.",
 		Remediation: map[string]string{
 			"default": "Check that the database file is not corrupted:\n  sqlite3 kite.db 'PRAGMA integrity_check;'\nIf corrupted, delete the file and re-scan to rebuild:\n  rm kite.db && kite-collector scan\nBackup the file before deleting if it contains important data.",
+		},
+	},
+	"KITE-E011": {
+		Code:    "KITE-E011",
+		Message: "Panic recovered",
+		Cause:   "A Go panic was caught by the recovery middleware. The process continued operating but the operation that panicked was aborted.",
+		Remediation: map[string]string{
+			"default": "Check the structured error log for the full stack trace.\nIdentify the component that panicked from the 'component' field.\nReport the issue with the stack trace to the development team.\nIf the panic recurs, the circuit breaker will temporarily disable the affected source.",
+		},
+	},
+	"KITE-E012": {
+		Code:    "KITE-E012",
+		Message: "Circuit breaker tripped",
+		Cause:   "A discovery source has been disabled after repeated consecutive failures. It will be retried automatically after the cooldown period.",
+		Remediation: map[string]string{
+			"default": "Check the source health via GET /api/v1/source-health.\nReview logs for the specific failure reason.\nVerify connectivity to the upstream API or service.\nThe source will be retried automatically after the cooldown (default: 5 minutes).\nTo adjust thresholds: safety.circuit_breaker.failure_threshold in kite-collector.yaml.",
+		},
+	},
+	"KITE-E013": {
+		Code:    "KITE-E013",
+		Message: "Scan deadline exceeded",
+		Cause:   "The scan did not complete within the configured deadline. Partial results were saved but some phases (software collection, auditing, stale-asset detection) may have been skipped.",
+		Remediation: map[string]string{
+			"default": "Increase the deadline: safety.scan_deadline in kite-collector.yaml (default: 30m).\nReduce scan scope: disable slow sources or narrow CIDR ranges.\nCheck source latency: sources behind high-latency networks increase scan time.\nReview the scan result status for which phases completed.",
+		},
+	},
+	"KITE-E014": {
+		Code:    "KITE-E014",
+		Message: "Response truncated",
+		Cause:   "An HTTP response exceeded the maximum allowed size and was truncated. The client received a partial response body.",
+		Remediation: map[string]string{
+			"default": "Use pagination parameters (limit, offset) to request smaller result sets.\nIncrease the limit if needed: safety.max_response_bytes in kite-collector.yaml (default: 10 MB).\nFilter results using query parameters to reduce response size.",
+		},
+	},
+	"KITE-E015": {
+		Code:    "KITE-E015",
+		Message: "Request body too large",
+		Cause:   "An incoming HTTP request body exceeded the maximum allowed size and was rejected.",
+		Remediation: map[string]string{
+			"default": "Reduce the size of the request payload.\nIncrease the limit if needed: safety.max_request_bytes in kite-collector.yaml (default: 1 MB).\nFor bulk operations, split large payloads into multiple smaller requests.",
 		},
 	},
 }

@@ -19,7 +19,12 @@ type Metrics struct {
 	ScanCoverage    *prometheus.GaugeVec
 	StaleAssets     prometheus.Gauge
 	DedupSkipped    prometheus.Counter
-	registry        *prometheus.Registry
+	PanicsRecovered        *prometheus.CounterVec
+	CircuitBreakerTrips    *prometheus.CounterVec
+	SourceHealth           *prometheus.GaugeVec
+	ResponseTruncations    prometheus.Counter
+	ScanDeadlineExceeded   prometheus.Counter
+	registry               *prometheus.Registry
 }
 
 // New creates a Metrics instance backed by a private registry.
@@ -61,6 +66,31 @@ func New() *Metrics {
 		Help: "Total number of duplicate assets skipped during deduplication.",
 	})
 
+	panicsRecovered := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kite_panics_recovered_total",
+		Help: "Total number of panics caught by recovery middleware.",
+	}, []string{"component"})
+
+	circuitBreakerTrips := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kite_circuit_breaker_trips_total",
+		Help: "Total number of circuit breaker trips per discovery source.",
+	}, []string{"source"})
+
+	sourceHealth := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kite_source_health",
+		Help: "Discovery source health: 0=open, 0.5=degraded, 1=healthy.",
+	}, []string{"source"})
+
+	responseTruncations := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "kite_response_truncations_total",
+		Help: "Total number of HTTP responses truncated due to size limits.",
+	})
+
+	scanDeadlineExceeded := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "kite_scan_deadline_exceeded_total",
+		Help: "Total number of scans that exceeded the deadline.",
+	})
+
 	reg.MustRegister(
 		scanDuration,
 		assetsTotal,
@@ -69,17 +99,27 @@ func New() *Metrics {
 		scanCoverage,
 		staleAssets,
 		dedupSkipped,
+		panicsRecovered,
+		circuitBreakerTrips,
+		sourceHealth,
+		responseTruncations,
+		scanDeadlineExceeded,
 	)
 
 	return &Metrics{
-		ScanDuration:    scanDuration,
-		AssetsTotal:     assetsTotal,
-		EventsEmitted:   eventsEmitted,
-		DiscoveryErrors: discoveryErrors,
-		ScanCoverage:    scanCoverage,
-		StaleAssets:     staleAssets,
-		DedupSkipped:    dedupSkipped,
-		registry:        reg,
+		ScanDuration:         scanDuration,
+		AssetsTotal:          assetsTotal,
+		EventsEmitted:        eventsEmitted,
+		DiscoveryErrors:      discoveryErrors,
+		ScanCoverage:         scanCoverage,
+		StaleAssets:          staleAssets,
+		DedupSkipped:         dedupSkipped,
+		PanicsRecovered:      panicsRecovered,
+		CircuitBreakerTrips:  circuitBreakerTrips,
+		SourceHealth:         sourceHealth,
+		ResponseTruncations:  responseTruncations,
+		ScanDeadlineExceeded: scanDeadlineExceeded,
+		registry:             reg,
 	}
 }
 
