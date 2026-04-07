@@ -119,6 +119,14 @@ func (m *mockStore) ListPostureAssessments(_ context.Context, _ store.PostureFil
 	return nil, nil
 }
 
+func (m *mockStore) InsertRuntimeIncident(_ context.Context, _ model.RuntimeIncident) error {
+	return nil
+}
+
+func (m *mockStore) ListRuntimeIncidents(_ context.Context, _ store.IncidentFilter) ([]model.RuntimeIncident, error) {
+	return nil, nil
+}
+
 func (m *mockStore) Migrate(_ context.Context) error { return nil }
 
 func (m *mockStore) Close() error { return nil }

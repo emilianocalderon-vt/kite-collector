@@ -97,11 +97,26 @@ type Store interface {
 	// ListPostureAssessments returns posture assessments matching the filter.
 	ListPostureAssessments(ctx context.Context, filter PostureFilter) ([]model.PostureAssessment, error)
 
+	// InsertRuntimeIncident persists a single runtime incident record.
+	InsertRuntimeIncident(ctx context.Context, incident model.RuntimeIncident) error
+
+	// ListRuntimeIncidents returns runtime incidents matching the filter.
+	ListRuntimeIncidents(ctx context.Context, filter IncidentFilter) ([]model.RuntimeIncident, error)
+
 	// Migrate creates the schema tables and indexes if they do not exist.
 	Migrate(ctx context.Context) error
 
 	// Close releases all resources held by the store.
 	Close() error
+}
+
+// IncidentFilter constrains which runtime incidents are returned.
+type IncidentFilter struct {
+	ScanRunID    *uuid.UUID
+	IncidentType string
+	Since        *time.Time
+	Limit        int
+	Offset       int
 }
 
 // FindingFilter constrains which config findings are returned by ListFindings.

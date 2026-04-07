@@ -995,6 +995,107 @@ func (s *PostgresStore) ListPostureAssessments(ctx context.Context, filter store
 }
 
 // ---------------------------------------------------------------------------
+// Runtime Incidents
+// ---------------------------------------------------------------------------
+
+func (s *PostgresStore) InsertRuntimeIncident(ctx context.Context, incident model.RuntimeIncident) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO runtime_incidents
+		(id, incident_type, component, error_message, stack_trace, scan_run_id,
+		 severity, recovered, error_code, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		incident.ID,
+		string(incident.IncidentType),
+		incident.Component,
+		incident.ErrorMessage,
+		nullStr(incident.StackTrace),
+		incident.ScanRunID,
+		incident.Severity,
+		incident.Recovered,
+		nullStr(incident.ErrorCode),
+		incident.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert runtime incident %s: %w", incident.ID, err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) ListRuntimeIncidents(ctx context.Context, filter store.IncidentFilter) ([]model.RuntimeIncident, error) {
+	var (
+		clauses []string
+		args    []any
+		paramN  int
+	)
+
+	if filter.ScanRunID != nil {
+		paramN++
+		clauses = append(clauses, fmt.Sprintf("scan_run_id = $%d", paramN))
+		args = append(args, *filter.ScanRunID)
+	}
+	if filter.IncidentType != "" {
+		paramN++
+		clauses = append(clauses, fmt.Sprintf("incident_type = $%d", paramN))
+		args = append(args, filter.IncidentType)
+	}
+	if filter.Since != nil {
+		paramN++
+		clauses = append(clauses, fmt.Sprintf("created_at >= $%d", paramN))
+		args = append(args, *filter.Since)
+	}
+
+	query := `SELECT id, incident_type, component, error_message, stack_trace,
+		scan_run_id, severity, recovered, error_code, created_at
+		FROM runtime_incidents`
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	query += " ORDER BY created_at DESC"
+
+	if filter.Limit > 0 {
+		paramN++
+		query += fmt.Sprintf(" LIMIT $%d", paramN)
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		paramN++
+		query += fmt.Sprintf(" OFFSET $%d", paramN)
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime incidents: %w", err)
+	}
+	defer rows.Close()
+
+	var incidents []model.RuntimeIncident
+	for rows.Next() {
+		var inc model.RuntimeIncident
+		var stackTrace, errorCode *string
+		err := rows.Scan(
+			&inc.ID,
+			&inc.IncidentType,
+			&inc.Component,
+			&inc.ErrorMessage,
+			&stackTrace,
+			&inc.ScanRunID,
+			&inc.Severity,
+			&inc.Recovered,
+			&errorCode,
+			&inc.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan incident row: %w", err)
+		}
+		inc.StackTrace = derefStr(stackTrace)
+		inc.ErrorCode = derefStr(errorCode)
+		incidents = append(incidents, inc)
+	}
+	return incidents, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

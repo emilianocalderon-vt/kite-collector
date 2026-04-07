@@ -1127,6 +1127,138 @@ func (s *SQLiteStore) ListPostureAssessments(ctx context.Context, filter store.P
 }
 
 // ---------------------------------------------------------------------------
+// Runtime Incidents
+// ---------------------------------------------------------------------------
+
+const incidentColumns = `id, incident_type, component, error_message,
+	stack_trace, scan_run_id, severity, recovered, error_code, created_at`
+
+func (s *SQLiteStore) InsertRuntimeIncident(ctx context.Context, incident model.RuntimeIncident) error {
+	var scanRunID sql.NullString
+	if incident.ScanRunID != nil {
+		scanRunID = sql.NullString{String: incident.ScanRunID.String(), Valid: true}
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO runtime_incidents (`+incidentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		incident.ID.String(),
+		string(incident.IncidentType),
+		incident.Component,
+		incident.ErrorMessage,
+		nullStr(incident.StackTrace),
+		scanRunID,
+		incident.Severity,
+		boolToInt(incident.Recovered),
+		nullStr(incident.ErrorCode),
+		incident.CreatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("insert runtime incident %s: %w", incident.ID, err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListRuntimeIncidents(ctx context.Context, filter store.IncidentFilter) ([]model.RuntimeIncident, error) {
+	var (
+		clauses []string
+		args    []any
+	)
+	if filter.ScanRunID != nil {
+		clauses = append(clauses, "scan_run_id = ?")
+		args = append(args, filter.ScanRunID.String())
+	}
+	if filter.IncidentType != "" {
+		clauses = append(clauses, "incident_type = ?")
+		args = append(args, filter.IncidentType)
+	}
+	if filter.Since != nil {
+		clauses = append(clauses, "created_at >= ?")
+		args = append(args, filter.Since.Format(time.RFC3339Nano))
+	}
+
+	query := "SELECT " + incidentColumns + " FROM runtime_incidents"
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	query += " ORDER BY created_at DESC"
+
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime incidents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var incidents []model.RuntimeIncident
+	for rows.Next() {
+		inc, err := scanIncident(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan incident row: %w", err)
+		}
+		incidents = append(incidents, *inc)
+	}
+	return incidents, rows.Err()
+}
+
+func scanIncident(row interface{ Scan(dest ...any) error }) (*model.RuntimeIncident, error) {
+	var (
+		inc        model.RuntimeIncident
+		idStr      string
+		scanRunID  sql.NullString
+		stackTrace sql.NullString
+		errorCode  sql.NullString
+		createdAt  string
+		recovered  int
+	)
+	err := row.Scan(
+		&idStr,
+		&inc.IncidentType,
+		&inc.Component,
+		&inc.ErrorMessage,
+		&stackTrace,
+		&scanRunID,
+		&inc.Severity,
+		&recovered,
+		&errorCode,
+		&createdAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	inc.ID, _ = uuid.Parse(idStr)
+	inc.Recovered = recovered != 0
+	if stackTrace.Valid {
+		inc.StackTrace = stackTrace.String
+	}
+	if errorCode.Valid {
+		inc.ErrorCode = errorCode.String
+	}
+	if scanRunID.Valid {
+		id, _ := uuid.Parse(scanRunID.String)
+		inc.ScanRunID = &id
+	}
+	inc.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	if inc.CreatedAt.IsZero() {
+		inc.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	}
+	return &inc, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
