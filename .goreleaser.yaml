@@ -17,11 +17,15 @@ builds:
       - goos: windows
         goarch: arm64
 
-# Flat binary distribution — single file download, no tar.gz.
+# Tarball for Homebrew (brews requires tar.gz, not raw binaries).
 archives:
+  - id: homebrew
+    formats: [tar.gz]
+    name_template: "kite-collector_{{ .Os }}_{{ .Arch }}"
+  # Flat binary distribution — single file download, no tar.gz.
   - id: flat
     formats: [binary]
-    name_template: "kite-collector_{{ .Os }}_{{ .Arch }}"
+    name_template: "kite-collector_{{ .Os }}_{{ .Arch }}_bin"
 
 checksum:
   name_template: "checksums.txt"
@@ -43,6 +47,22 @@ nfpms:
       - src: configs/kite-collector.example.yaml
         dst: /etc/kite-collector/kite-collector.example.yaml
         type: config
+
+# Homebrew tap — GoReleaser auto-generates the formula and pushes it
+# to the tap repo on every v* release.
+brews:
+  - name: kite-collector
+    ids: [homebrew]
+    repository:
+      owner: VulnerTrack
+      name: homebrew-tap
+    homepage: https://github.com/VulnerTrack/kite-collector
+    description: "Cybersecurity asset discovery, configuration audit, and posture analysis agent"
+    license: MIT
+    install: |
+      bin.install "kite-collector"
+    test: |
+      system "#{bin}/kite-collector", "version"
 
 changelog:
   sort: asc
