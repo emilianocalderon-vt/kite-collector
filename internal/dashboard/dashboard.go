@@ -1,7 +1,9 @@
 package dashboard
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -42,37 +44,43 @@ func Serve(addr string, st store.Store, rc ReportContext, logger *slog.Logger) *
 		_, _ = w.Write(indexContent)
 	})
 
+	// renderFragment renders a template to a buffer first, then writes to
+	// the response. This prevents "superfluous WriteHeader" when a template
+	// error occurs after partial output has already been sent.
+	renderFragment := func(w http.ResponseWriter, name string, render func(io.Writer) error) {
+		var buf bytes.Buffer
+		if renderErr := render(&buf); renderErr != nil {
+			logger.Error("dashboard: render "+name, "error", renderErr)
+			http.Error(w, renderErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(buf.Bytes())
+	}
+
 	// HTMX fragment endpoints — return HTML snippets for dynamic loading.
 	mux.HandleFunc("GET /fragments/assets", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if renderErr := renderAssetsFragment(w, r.Context(), st, rc); renderErr != nil {
-			logger.Error("dashboard: render assets", "error", renderErr)
-			http.Error(w, renderErr.Error(), http.StatusInternalServerError)
-		}
+		renderFragment(w, "assets", func(buf io.Writer) error {
+			return renderAssetsFragment(buf, r.Context(), st, rc)
+		})
 	})
 
 	mux.HandleFunc("GET /fragments/software", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if renderErr := renderSoftwareFragment(w, r.Context(), st, rc); renderErr != nil {
-			logger.Error("dashboard: render software", "error", renderErr)
-			http.Error(w, renderErr.Error(), http.StatusInternalServerError)
-		}
+		renderFragment(w, "software", func(buf io.Writer) error {
+			return renderSoftwareFragment(buf, r.Context(), st, rc)
+		})
 	})
 
 	mux.HandleFunc("GET /fragments/findings", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if renderErr := renderFindingsFragment(w, r.Context(), st, rc); renderErr != nil {
-			logger.Error("dashboard: render findings", "error", renderErr)
-			http.Error(w, renderErr.Error(), http.StatusInternalServerError)
-		}
+		renderFragment(w, "findings", func(buf io.Writer) error {
+			return renderFindingsFragment(buf, r.Context(), st, rc)
+		})
 	})
 
 	mux.HandleFunc("GET /fragments/scans", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if renderErr := renderScansFragment(w, r.Context(), st, rc); renderErr != nil {
-			logger.Error("dashboard: render scans", "error", renderErr)
-			http.Error(w, renderErr.Error(), http.StatusInternalServerError)
-		}
+		renderFragment(w, "scans", func(buf io.Writer) error {
+			return renderScansFragment(buf, r.Context(), st, rc)
+		})
 	})
 
 	// CSV export endpoints.

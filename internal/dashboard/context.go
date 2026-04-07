@@ -36,8 +36,9 @@ type ReportContext struct {
 	DBSize string
 
 	// Report
-	ReportID    string
-	GeneratedAt string
+	ReportID       string
+	GeneratedAtUTC string
+	GeneratedAtLocal string
 
 	// Latest scan
 	ScanRunID     string
@@ -62,8 +63,9 @@ func NewReportContext(ctx context.Context, st store.Store, dbPath, version, comm
 		OS:          runtime.GOOS,
 		Arch:        runtime.GOARCH,
 		DBPath:      dbPath,
-		ReportID:    uuid.Must(uuid.NewV7()).String(),
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		ReportID:         uuid.Must(uuid.NewV7()).String(),
+		GeneratedAtUTC:   time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
+		GeneratedAtLocal: time.Now().Local().Format("2006-01-02 15:04:05 MST"),
 	}
 
 	// Database file size.

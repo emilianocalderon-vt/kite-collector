@@ -12,7 +12,7 @@ import (
 // writeCSVHeader writes report traceability metadata as CSV comment lines.
 func writeCSVHeader(w io.Writer, rc ReportContext) {
 	_, _ = fmt.Fprintf(w, "# Report ID: %s\n", rc.ReportID)
-	_, _ = fmt.Fprintf(w, "# Generated: %s\n", rc.GeneratedAt)
+	_, _ = fmt.Fprintf(w, "# Generated: %s (%s)\n", rc.GeneratedAtUTC, rc.GeneratedAtLocal)
 	if rc.ScanRunID != "" {
 		_, _ = fmt.Fprintf(w, "# Scan Run: %s\n", rc.ScanRunID)
 	}

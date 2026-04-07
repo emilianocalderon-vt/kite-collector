@@ -18,15 +18,15 @@ var templateFuncs = template.FuncMap{
 	"formatTime": func(t time.Time) string {
 		return t.Format("2006-01-02 15:04:05")
 	},
-	"severityClass": func(s string) string {
-		switch strings.ToLower(s) {
-		case "critical":
+	"severityClass": func(s model.Severity) string {
+		switch s {
+		case model.SeverityCritical:
 			return "badge-red"
-		case "high":
+		case model.SeverityHigh:
 			return "badge-orange"
-		case "medium":
+		case model.SeverityMedium:
 			return "badge-yellow"
-		case "low":
+		case model.SeverityLow:
 			return "badge-blue"
 		default:
 			return "badge-gray"
