@@ -86,6 +86,53 @@ discovery:
       enabled: false
       # Credentials: KITE_KAMATERA_CLIENT_ID, KITE_KAMATERA_SECRET
 
+    # MDM connectors — devices from these sources are marked is_managed = "managed"
+    intune:
+      enabled: false
+      # Microsoft Intune via Graph API (OAuth2 client credentials)
+      # Credentials via env vars:
+      #   KITE_INTUNE_TENANT_ID      – Azure AD tenant ID
+      #   KITE_INTUNE_CLIENT_ID      – Application (client) ID
+      #   KITE_INTUNE_CLIENT_SECRET  – Client secret value
+
+    jamf:
+      enabled: false
+      # Jamf Pro Classic API
+      # api_url: https://myorg.jamfcloud.com
+      # Credentials via env vars:
+      #   KITE_JAMF_API_URL   – Jamf Pro instance URL (or set api_url above)
+      #   KITE_JAMF_USERNAME  – API account username
+      #   KITE_JAMF_PASSWORD  – API account password
+
+    sccm:
+      enabled: false
+      # Microsoft SCCM/ConfigMgr AdminService REST API
+      # api_url: https://sccm.corp.local
+      # Credentials via env vars:
+      #   KITE_SCCM_API_URL   – AdminService base URL (or set api_url above)
+      #   KITE_SCCM_USERNAME  – Account username
+      #   KITE_SCCM_PASSWORD  – Account password
+
+    # CMDB connectors — CIs from these sources are marked is_authorized = "authorized"
+    netbox:
+      enabled: false
+      # NetBox REST API (DCIM/IPAM)
+      # api_url: https://netbox.corp.local
+      # Credentials via env vars:
+      #   KITE_NETBOX_API_URL – NetBox instance URL (or set api_url above)
+      #   KITE_NETBOX_TOKEN   – API authentication token (read-only)
+
+    servicenow:
+      enabled: false
+      # ServiceNow Table API (CMDB)
+      # instance_url: https://myorg.service-now.com
+      # table: cmdb_ci_server
+      # Credentials via env vars:
+      #   KITE_SERVICENOW_INSTANCE_URL – Instance URL (or set instance_url above)
+      #   KITE_SERVICENOW_USERNAME     – API account username
+      #   KITE_SERVICENOW_PASSWORD     – API account password
+      #   KITE_SERVICENOW_TABLE        – CMDB table (default: cmdb_ci_server)
+
     # aws:                    # Future
     #   enabled: false
     #   regions: [us-east-1, eu-west-1]
