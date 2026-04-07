@@ -145,7 +145,7 @@ sources automatically.`,
 	cmd.Flags().StringVar(&cfgFile, "config", "kite-collector.yaml", "path to configuration file")
 	cmd.Flags().StringSliceVar(&scope, "scope", nil, "CIDR scopes (overrides config)")
 	cmd.Flags().StringVar(&output, "output", "table", "output format: json, csv, table")
-	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&dbPath, "db", "./kite.db", "path to SQLite database")
 	cmd.Flags().StringSliceVar(&sources, "source", nil, "discovery sources to enable")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logging")
 	cmd.Flags().BoolVar(&autoDiscovery, "auto", false, "auto-discover infrastructure services and enable ready sources")
@@ -976,7 +976,7 @@ Supported formats: json, csv, table, html.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&dbPath, "db", "./kite.db", "path to SQLite database")
 	cmd.Flags().StringVar(&format, "format", "table", "report format: json, csv, table, html")
 	cmd.Flags().StringVar(&output, "output", "", "output file path (default: stdout)")
 
@@ -1221,7 +1221,7 @@ Targets:
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&dbPath, "db", "./kite.db", "path to SQLite database")
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum rows to return")
 	cmd.Flags().StringVar(&severity, "severity", "", "filter findings by severity")
 
@@ -1324,7 +1324,7 @@ If sqlite3 is not installed, prints a help message instead.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&dbPath, "db", "./kite.db", "path to SQLite database")
 
 	return cmd
 }
@@ -1464,7 +1464,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&dbPath, "db", "./kite.db", "path to SQLite database")
 	cmd.Flags().BoolVar(&status, "status", false, "show applied and pending migrations")
 	cmd.Flags().StringVar(&repair, "repair", "", "remove migration entry for re-application")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be applied without running")
@@ -2068,7 +2068,7 @@ from the local SQLite database — no external connections are made.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db", "./data/kite.db", "path to SQLite database")
+	cmd.Flags().StringVar(&dbPath, "db", "./kite.db", "path to SQLite database")
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:9090", "listen address for the dashboard")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not open a browser automatically")
 
@@ -2098,7 +2098,7 @@ func runInteractiveMenu() {
 	switch strings.TrimSpace(scanner.Text()) {
 	case "1":
 		fmt.Println("\nStarting scan with defaults...")
-		if err := runScan("kite-collector.yaml", nil, "table", "./data/kite.db", nil, false, false); err != nil {
+		if err := runScan("kite-collector.yaml", nil, "table", "./kite.db", nil, false, false); err != nil {
 			fmt.Fprintf(os.Stderr, "Scan error: %v\n", err)
 		}
 	case "2":

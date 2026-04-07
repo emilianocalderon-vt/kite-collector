@@ -25,7 +25,7 @@ var _ store.Store = (*SQLiteStore)(nil)
 
 // New opens (or creates) a SQLite database at dbPath and returns an
 // initialised SQLiteStore. The connection enables WAL journal mode, a 5-second
-// busy timeout, and foreign key enforcement via pragma DSN parameters.
+// busy timeout, foreign key enforcement, and performance pragmas.
 func New(dbPath string) (*SQLiteStore, error) {
 	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
 	db, err := sql.Open("sqlite", dsn)
@@ -36,6 +36,20 @@ func New(dbPath string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite ping %s: %w", dbPath, err)
 	}
+
+	// Performance pragmas (session-level, not persisted in schema).
+	for _, p := range []string{
+		"PRAGMA synchronous = NORMAL",  // safe with WAL, ~2x faster writes
+		"PRAGMA cache_size = -64000",   // 64MB page cache (default 2MB)
+		"PRAGMA temp_store = MEMORY",   // temp tables in RAM
+		"PRAGMA mmap_size = 268435456", // 256MB memory-mapped I/O
+	} {
+		if _, pErr := db.Exec(p); pErr != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("sqlite pragma %q: %w", p, pErr)
+		}
+	}
+
 	return &SQLiteStore{db: db}, nil
 }
 

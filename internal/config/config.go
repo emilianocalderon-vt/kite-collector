@@ -147,7 +147,7 @@ func Load(path string) (*Config, error) {
 	// Defaults
 	v.SetDefault("log_level", "info")
 	v.SetDefault("output_format", "table")
-	v.SetDefault("data_dir", "./data")
+	v.SetDefault("data_dir", ".")
 	v.SetDefault("stale_threshold", "168h")
 	v.SetDefault("discovery.sources.agent.enabled", true)
 	v.SetDefault("discovery.sources.agent.collect_software", true)

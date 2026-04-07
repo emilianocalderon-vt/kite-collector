@@ -52,8 +52,8 @@ curl -k https://localhost:55000/security/user/authenticate
 
 **Fix (Linux):**
 ```bash
-lsof data/kite.db
-fuser data/kite.db
+lsof kite.db
+fuser kite.db
 ```
 
 **Fix (Windows):**
@@ -163,9 +163,9 @@ Or use auto-discovery: `kite-collector scan --auto`
 **Fix:**
 ```bash
 # Check database integrity
-sqlite3 data/kite.db 'PRAGMA integrity_check;'
+sqlite3 kite.db 'PRAGMA integrity_check;'
 
 # If corrupted, delete and re-scan
-rm data/kite.db
+rm kite.db
 kite-collector scan
 ```

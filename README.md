@@ -159,23 +159,23 @@ Assets never default to `authorized`. Only positive matches against your source 
 
 ## Database
 
-All results are stored in a portable SQLite file at `./data/kite.db`:
+All results are stored in a portable SQLite file at `./kite.db`:
 
 ```bash
 # Query assets
-sqlite3 data/kite.db "SELECT hostname, asset_type, is_authorized FROM assets"
+sqlite3 kite.db "SELECT hostname, asset_type, is_authorized FROM assets"
 
 # Query installed software
-sqlite3 data/kite.db "SELECT software_name, version, cpe23 FROM installed_software LIMIT 10"
+sqlite3 kite.db "SELECT software_name, version, cpe23 FROM installed_software LIMIT 10"
 
 # Query config findings
-sqlite3 data/kite.db "SELECT check_id, severity, cwe_id, title FROM config_findings"
+sqlite3 kite.db "SELECT check_id, severity, cwe_id, title FROM config_findings"
 
 # Query posture assessments
-sqlite3 data/kite.db "SELECT capec_id, likelihood, mitigation FROM posture_assessments"
+sqlite3 kite.db "SELECT capec_id, likelihood, mitigation FROM posture_assessments"
 
 # Scan history
-sqlite3 data/kite.db "SELECT started_at, status, total_assets FROM scan_runs ORDER BY started_at DESC"
+sqlite3 kite.db "SELECT started_at, status, total_assets FROM scan_runs ORDER BY started_at DESC"
 ```
 
 ## Platform integration

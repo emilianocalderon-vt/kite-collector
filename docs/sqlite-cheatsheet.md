@@ -157,7 +157,7 @@ WHERE n.is_public = 1;
 kite-collector query assets > assets.csv
 
 # Using sqlite3 directly
-sqlite3 -header -csv data/kite.db "SELECT * FROM assets" > assets.csv
+sqlite3 -header -csv kite.db "SELECT * FROM assets" > assets.csv
 ```
 
 ## Database schema

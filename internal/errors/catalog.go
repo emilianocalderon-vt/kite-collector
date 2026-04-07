@@ -96,7 +96,7 @@ var Catalog = map[string]KiteError{
 		Message: "SQLite database locked",
 		Cause:   "Another process has the database file open with an exclusive lock.",
 		Remediation: map[string]string{
-			"linux":   "Check for other kite-collector or sqlite3 processes:\n  lsof data/kite.db\n  fuser data/kite.db\nWait a few seconds and try again.",
+			"linux":   "Check for other kite-collector or sqlite3 processes:\n  lsof kite.db\n  fuser kite.db\nWait a few seconds and try again.",
 			"windows": "Check for other kite-collector or sqlite3 processes in Task Manager.\nClose any open database viewers and try again.",
 			"default": "Close any other kite-collector or sqlite3 processes.\nWait a few seconds and try again.",
 		},
@@ -159,7 +159,7 @@ var Catalog = map[string]KiteError{
 		Message: "Database migration failed",
 		Cause:   "The SQLite schema migration could not be applied.",
 		Remediation: map[string]string{
-			"default": "Check that the database file is not corrupted:\n  sqlite3 data/kite.db 'PRAGMA integrity_check;'\nIf corrupted, delete the file and re-scan to rebuild:\n  rm data/kite.db && kite-collector scan\nBackup the file before deleting if it contains important data.",
+			"default": "Check that the database file is not corrupted:\n  sqlite3 kite.db 'PRAGMA integrity_check;'\nIf corrupted, delete the file and re-scan to rebuild:\n  rm kite.db && kite-collector scan\nBackup the file before deleting if it contains important data.",
 		},
 	},
 }

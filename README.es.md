@@ -175,7 +175,7 @@ Los activos nunca se clasifican como `authorized` por defecto. Solo las coincide
 
 ## Base de datos
 
-Todos los resultados se almacenan en un archivo SQLite portatil en `./data/kite.db`:
+Todos los resultados se almacenan en un archivo SQLite portatil en `./kite.db`:
 
 ```bash
 # Consultar activos
