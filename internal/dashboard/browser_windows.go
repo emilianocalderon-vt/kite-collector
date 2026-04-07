@@ -2,8 +2,11 @@
 
 package dashboard
 
-import "os/exec"
+import (
+	"context"
+	"os/exec"
+)
 
 func openBrowser(url string) {
-	_ = exec.Command("cmd", "/c", "start", url).Start() //#nosec G204 -- url is from trusted internal code
+	_ = exec.CommandContext(context.Background(), "cmd", "/c", "start", url).Start() //#nosec G204 -- url is from trusted internal code
 }

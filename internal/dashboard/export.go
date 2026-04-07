@@ -11,14 +11,14 @@ import (
 
 // writeCSVHeader writes report traceability metadata as CSV comment lines.
 func writeCSVHeader(w io.Writer, rc ReportContext) {
-	fmt.Fprintf(w, "# Report ID: %s\n", rc.ReportID)
-	fmt.Fprintf(w, "# Generated: %s\n", rc.GeneratedAt)
+	_, _ = fmt.Fprintf(w, "# Report ID: %s\n", rc.ReportID)
+	_, _ = fmt.Fprintf(w, "# Generated: %s\n", rc.GeneratedAt)
 	if rc.ScanRunID != "" {
-		fmt.Fprintf(w, "# Scan Run: %s\n", rc.ScanRunID)
+		_, _ = fmt.Fprintf(w, "# Scan Run: %s\n", rc.ScanRunID)
 	}
-	fmt.Fprintf(w, "# Application: %s %s (commit %s)\n", rc.AppName, rc.AppVersion, rc.Commit)
-	fmt.Fprintf(w, "# Host: %s (%s/%s)\n", rc.Hostname, rc.OS, rc.Arch)
-	fmt.Fprintf(w, "# Database: %s\n", rc.DBPath)
+	_, _ = fmt.Fprintf(w, "# Application: %s %s (commit %s)\n", rc.AppName, rc.AppVersion, rc.Commit)
+	_, _ = fmt.Fprintf(w, "# Host: %s (%s/%s)\n", rc.Hostname, rc.OS, rc.Arch)
+	_, _ = fmt.Fprintf(w, "# Database: %s\n", rc.DBPath)
 }
 
 // exportAssetsCSV writes all assets as CSV with report headers.

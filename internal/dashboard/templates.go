@@ -38,9 +38,10 @@ var templateFuncs = template.FuncMap{
 			return "badge-green"
 		case model.AuthorizationUnauthorized:
 			return "badge-red"
-		default:
+		case model.AuthorizationUnknown:
 			return "badge-yellow"
 		}
+		return "badge-yellow"
 	},
 }
 

@@ -2,9 +2,12 @@
 
 package dashboard
 
-import "os/exec"
+import (
+	"context"
+	"os/exec"
+)
 
 func openBrowser(url string) {
 	// xdg-open is the standard on Linux.
-	_ = exec.Command("xdg-open", url).Start() //#nosec G204 -- url is from trusted internal code
+	_ = exec.CommandContext(context.Background(), "xdg-open", url).Start() //#nosec G204 -- url is from trusted internal code
 }

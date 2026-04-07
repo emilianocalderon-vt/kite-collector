@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -121,7 +120,3 @@ func OpenBrowser(url string) {
 	openBrowser(url)
 }
 
-// contextDone returns a channel that is closed when ctx is done.
-func contextDone(ctx context.Context) <-chan struct{} {
-	return ctx.Done()
-}
