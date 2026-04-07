@@ -44,7 +44,7 @@ func New(dbPath string) (*SQLiteStore, error) {
 		"PRAGMA temp_store = MEMORY",   // temp tables in RAM
 		"PRAGMA mmap_size = 268435456", // 256MB memory-mapped I/O
 	} {
-		if _, pErr := db.Exec(p); pErr != nil {
+		if _, pErr := db.ExecContext(context.Background(), p); pErr != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("sqlite pragma %q: %w", p, pErr)
 		}

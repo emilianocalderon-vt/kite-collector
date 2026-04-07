@@ -162,7 +162,7 @@ func TestFragmentEndpoints_NoSuperfluousWriteHeader(t *testing.T) {
 
 	for _, ep := range endpoints {
 		t.Run(ep, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, ep, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, ep, nil)
 			rec := httptest.NewRecorder()
 			srv.Handler.ServeHTTP(rec, req)
 			assert.Equal(t, http.StatusOK, rec.Code,
