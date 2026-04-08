@@ -2,12 +2,14 @@ package endpoint
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/vulnertrack/kite-collector/internal/config"
 )
@@ -154,6 +156,47 @@ func TestList(t *testing.T) {
 	require.Len(t, infos, 1)
 	assert.Equal(t, "ep1", infos[0].Name)
 	assert.Equal(t, "healthy", infos[0].State)
+}
+
+func TestTLSStateCapture_StoreAndRetrieve(t *testing.T) {
+	// TLSStateCapture should store and return state by authority.
+	capture := NewTLSStateCapture(nil)
+
+	_, ok := capture.GetState("example.com:443")
+	assert.False(t, ok, "no state should exist before handshake")
+
+	// Simulate a captured TLS state.
+	capture.mu.Lock()
+	capture.states["example.com:443"] = tls.ConnectionState{
+		Version:            tls.VersionTLS13,
+		ServerName:         "example.com",
+		HandshakeComplete:  true,
+		NegotiatedProtocol: "h2",
+	}
+	capture.mu.Unlock()
+
+	state, ok := capture.GetState("example.com:443")
+	require.True(t, ok)
+	assert.Equal(t, uint16(tls.VersionTLS13), state.Version)
+	assert.Equal(t, "example.com", state.ServerName)
+	assert.True(t, state.HandshakeComplete)
+
+	// Different authority returns nothing.
+	_, ok = capture.GetState("other.com:443")
+	assert.False(t, ok)
+}
+
+func TestChannelBindingInterceptor_NilCapture(t *testing.T) {
+	// With nil capture, the interceptor should be a transparent pass-through.
+	interceptor := ChannelBindingInterceptor(nil)
+	called := false
+	invoker := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+		called = true
+		return nil
+	}
+	err := interceptor(context.Background(), "/test", nil, nil, nil, invoker)
+	require.NoError(t, err)
+	assert.True(t, called)
 }
 
 func TestQueue(t *testing.T) {

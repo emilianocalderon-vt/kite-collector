@@ -125,20 +125,30 @@ func NewManager(ctx context.Context, configs []config.EndpointConfig, logger *sl
 func (m *Manager) connect(cfg config.EndpointConfig) (*Endpoint, error) {
 	opts := []grpc.DialOption{}
 
+	var capture *TLSStateCapture
+
 	if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
 		tc, err := buildMTLSConfig(cfg.TLS)
 		if err != nil {
 			return nil, err
 		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tc)))
+		capture = NewTLSStateCapture(credentials.NewTLS(tc))
+		opts = append(opts, grpc.WithTransportCredentials(capture))
 	} else if cfg.TLS.Enabled {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+		capture = NewTLSStateCapture(credentials.NewTLS(&tls.Config{
 			MinVersion: tls.VersionTLS13,
-		})))
+		}))
+		opts = append(opts, grpc.WithTransportCredentials(capture))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		m.logger.Warn("endpoint has no TLS configured — insecure", "name", cfg.Name)
 	}
+
+	// Channel binding interceptors use the captured TLS state (nil-safe).
+	opts = append(opts,
+		grpc.WithUnaryInterceptor(ChannelBindingInterceptor(capture)),
+		grpc.WithStreamInterceptor(ChannelBindingStreamInterceptor(capture)),
+	)
 
 	conn, err := grpc.NewClient(cfg.Address, opts...)
 	if err != nil {
