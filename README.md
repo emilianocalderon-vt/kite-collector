@@ -311,6 +311,10 @@ make test-otlp
 
 This starts a collector, runs a streaming scan, and verifies events arrive at the collector.
 
+### Runnable sample
+
+See [`samples/streaming-to-otel/`](samples/streaming-to-otel/) for a self-contained example: `docker compose up` starts a collector, then you point kite-collector at it.
+
 ## Security
 
 - **Read-only** -- never writes to, modifies, or executes code on discovered systems

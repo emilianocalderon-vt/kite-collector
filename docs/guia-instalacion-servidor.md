@@ -32,7 +32,6 @@ Esta guia cubre la instalacion y configuracion de **Kite Collector**, el agente 
 - **Sistema operativo**: Ubuntu 22.04+, Debian 12+, RHEL 9+, o cualquier distribucion Linux moderna
 - **Docker** (si se usa la instalacion con contenedores): Docker Engine 24+ y Docker Compose v2
 - **Go 1.26+** (solo si se compila desde codigo fuente)
-- **PostgreSQL 16** (requerido para el modo streaming)
 - Acceso de red a los activos que se desean descubrir
 
 ### Puertos utilizados
@@ -41,7 +40,6 @@ Esta guia cubre la instalacion y configuracion de **Kite Collector**, el agente 
 |--------|-----------|-------------|
 | 9090   | TCP       | Metricas Prometheus |
 | 8081   | TCP       | API HTTP (opcional) |
-| 5432   | TCP       | PostgreSQL (si es local) |
 
 ---
 
@@ -70,23 +68,18 @@ Crear un archivo `.env` en el directorio `apps/kite-collector/`:
 
 ```bash
 cat > .env << 'EOF'
-KITE_POSTGRES_DSN=postgres://kite:kite@postgres:5432/kite?sslmode=disable
 KITE_STREAMING_OTLP_ENDPOINT=otelcol:4318
 KITE_STREAMING_OTLP_PROTOCOL=http
 EOF
 ```
 
-> **Importante**: Cambiar las credenciales por defecto (`kite:kite`) en entornos de produccion.
-
-### 2.4 Levantar los servicios
+### 2.4 Levantar el servicio
 
 ```bash
-docker compose up -d
+docker compose up -d kite-collector
 ```
 
-Esto inicia dos contenedores:
-- **kite-collector**: el agente de descubrimiento
-- **postgres**: base de datos PostgreSQL para persistencia
+El agente utiliza SQLite localmente para persistencia (configurado via `data_dir`), por lo que no requiere una base de datos externa.
 
 ### 2.5 Verificar que los contenedores estan corriendo
 
@@ -142,18 +135,6 @@ sudo mkdir -p /var/lib/kite/data
 
 # Copiar la configuracion
 sudo cp configs/kite-collector.example.yaml /etc/kite/config.yaml
-```
-
-### 3.5 Instalar PostgreSQL (si no existe)
-
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install -y postgresql-16
-
-# Crear base de datos
-sudo -u postgres psql -c "CREATE USER kite WITH PASSWORD 'CAMBIA_ESTA_CONTRASEÑA';"
-sudo -u postgres psql -c "CREATE DATABASE kite OWNER kite;"
 ```
 
 ---
@@ -312,7 +293,7 @@ Para que el agente se ejecute automaticamente al iniciar el servidor:
 sudo cat > /etc/systemd/system/kite-collector.service << 'EOF'
 [Unit]
 Description=Kite Collector - Agente de descubrimiento de activos
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -326,7 +307,6 @@ StandardOutput=journal
 StandardError=journal
 
 # Credenciales (ajustar segun las fuentes habilitadas)
-Environment=KITE_POSTGRES_DSN=postgres://kite:CAMBIA_ESTA_CONTRASEÑA@localhost:5432/kite?sslmode=require
 # Environment=KITE_HETZNER_TOKEN=tu-token-aqui
 # Environment=KITE_DIGITALOCEAN_TOKEN=tu-token-aqui
 
@@ -416,21 +396,13 @@ streaming:
     protocol: http
 ```
 
-### 7.2 Conexion con PostgreSQL centralizado
-
-Si la plataforma central expone una base PostgreSQL:
-
-```bash
-export KITE_POSTGRES_DSN=postgres://kite:contraseña@db.vulnertrack.ejemplo.com:5432/kite?sslmode=require
-```
-
-### 7.3 Despliegue completo con la plataforma
+### 7.2 Despliegue completo con la plataforma
 
 Para desplegar el agente junto con toda la plataforma Vulnertrack, usar el `docker-compose.yml` principal desde la raiz del repositorio:
 
 ```bash
 cd vulnertack-intelligence-engine
-docker compose up -d kite-collector kite-postgres redis clickhouse otelcol grafana
+docker compose up -d kite-collector redis clickhouse otelcol grafana
 ```
 
 ---
@@ -443,25 +415,11 @@ docker compose up -d kite-collector kite-postgres redis clickhouse otelcol grafa
 - Si se ejecuta en Docker, verificar que el contenedor tiene acceso a la red del host (`network_mode: host`) o que las redes objetivo son alcanzables
 - Revisar las reglas de firewall (`iptables`, `ufw`, `firewalld`)
 
-### Error de conexion a PostgreSQL
-
-```bash
-# Verificar conectividad
-pg_isready -h localhost -p 5432 -U kite -d kite
-
-# Verificar que la base de datos existe
-psql -h localhost -U kite -d kite -c "SELECT 1;"
-```
-
 ### El contenedor Docker no arranca
 
 ```bash
 # Ver los logs de error
 docker compose logs kite-collector
-
-# Verificar que PostgreSQL esta listo
-docker compose logs postgres
-docker compose exec postgres pg_isready -U kite -d kite
 ```
 
 ### No se descubren contenedores Docker
