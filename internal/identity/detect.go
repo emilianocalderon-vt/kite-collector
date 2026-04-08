@@ -14,17 +14,19 @@ func DetectKeyBackend(preference, dataDir string, logger *slog.Logger) KeyBacken
 
 	switch preference {
 	case "tpm":
-		if TPMAvailable() {
+		b := NewTPMBackend(dataDir)
+		if b.Available() {
 			logger.Info("key backend: TPM 2.0 (requested)")
-			return NewFileBackend(dataDir) // placeholder — real TPM impl uses go-tpm
+			return b
 		}
 		logger.Warn("TPM requested but not available, falling back to file")
 		return NewFileBackend(dataDir)
 
 	case "keyring":
-		if KeyringAvailable() {
+		b := NewKeyringBackend()
+		if b.Available() {
 			logger.Info("key backend: OS keyring (requested)")
-			return NewFileBackend(dataDir) // placeholder — real keyring impl uses keyctl
+			return b
 		}
 		logger.Warn("keyring requested but not available, falling back to file")
 		return NewFileBackend(dataDir)
@@ -34,13 +36,13 @@ func DetectKeyBackend(preference, dataDir string, logger *slog.Logger) KeyBacken
 		return NewFileBackend(dataDir)
 
 	default: // "auto" or empty
-		if TPMAvailable() {
+		if tpm := NewTPMBackend(dataDir); tpm.Available() {
 			logger.Info("key backend: TPM 2.0 (auto-detected)")
-			return NewFileBackend(dataDir)
+			return tpm
 		}
-		if KeyringAvailable() {
+		if kr := NewKeyringBackend(); kr.Available() {
 			logger.Info("key backend: OS keyring (auto-detected)")
-			return NewFileBackend(dataDir)
+			return kr
 		}
 		logger.Info("key backend: file (fallback)")
 		return NewFileBackend(dataDir)
