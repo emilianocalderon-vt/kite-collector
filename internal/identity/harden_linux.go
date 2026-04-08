@@ -41,7 +41,7 @@ func TPMAvailable() bool {
 	if err != nil {
 		return false
 	}
-	defer root.Close() //nolint:errcheck
+	defer func() { _ = root.Close() }()
 
 	for _, name := range []string{"tpmrm0", "tpm0"} {
 		f, err := root.OpenFile(name, os.O_RDWR, 0)
