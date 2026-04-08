@@ -35,9 +35,16 @@ func HardenProcess(logger *slog.Logger) {
 // TPMAvailable checks if a TPM 2.0 device is accessible.
 // It attempts to open the device read-write to confirm actual access,
 // not just existence (which unix.Stat would report even without permission).
+// File access is scoped under /dev via os.Root to prevent directory traversal.
 func TPMAvailable() bool {
-	for _, path := range []string{"/dev/tpmrm0", "/dev/tpm0"} {
-		f, err := os.OpenFile(path, os.O_RDWR, 0)
+	root, err := os.OpenRoot("/dev")
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+
+	for _, name := range []string{"tpmrm0", "tpm0"} {
+		f, err := root.OpenFile(name, os.O_RDWR, 0)
 		if err == nil {
 			_ = f.Close()
 			return true
