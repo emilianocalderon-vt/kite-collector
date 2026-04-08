@@ -190,7 +190,126 @@ vie kite scan --scope 192.168.1.0/24 --import
 vie kite assets --authorized unauthorized
 ```
 
-In streaming mode, OTLP events are pushed to an OpenTelemetry Collector for real-time monitoring.
+## Streaming to OpenTelemetry
+
+kite-collector pushes asset lifecycle events to any OTLP-compatible collector (Grafana Alloy, OpenTelemetry Collector, Datadog Agent, etc.) as **OTLP log records over HTTP/JSON**.
+
+### Quick start
+
+1. Add the streaming block to your config file:
+
+```yaml
+streaming:
+  interval: 6h
+  otlp:
+    endpoint: http://localhost:4318
+    protocol: http
+```
+
+2. Run in continuous mode:
+
+```bash
+./kite-collector agent --stream --interval 6h
+```
+
+Events are sent to `<endpoint>/v1/logs` as they are generated each scan cycle.
+
+### Environment variable override
+
+You can skip the config file entirely using `KITE_` prefixed env vars:
+
+```bash
+export KITE_STREAMING_OTLP_ENDPOINT=otelcol:4318
+export KITE_STREAMING_OTLP_PROTOCOL=http
+./kite-collector agent --stream
+```
+
+### Mutual TLS
+
+For production deployments with mTLS:
+
+```yaml
+streaming:
+  otlp:
+    endpoint: https://otelcol.internal:4318
+    protocol: http
+    tls:
+      enabled: true
+      cert_file: /etc/kite/tls/client.crt
+      key_file: /etc/kite/tls/client.key
+      ca_file: /etc/kite/tls/ca.crt
+```
+
+### Event schema
+
+Each event is an OTLP log record with these attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `service.name` | Always `kite-collector` (resource attribute) |
+| `service.version` | Build version (resource attribute) |
+| `event_type` | One of: `AssetDiscovered`, `AssetUpdated`, `UnauthorizedAssetDetected`, `UnmanagedAssetDetected`, `AssetNotSeen`, `AssetRemoved` |
+| `asset_id` | UUID of the affected asset |
+| `scan_run_id` | UUID of the scan run that produced the event |
+| `severity` | `low`, `medium`, `high`, or `critical` |
+
+Severity maps to OTLP severity numbers: low=5 (DEBUG), medium=9 (INFO), high=13 (WARN), critical=17 (ERROR).
+
+### Example: OpenTelemetry Collector config
+
+```yaml
+# otel-collector-config.yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [loki, debug]
+```
+
+### Example: Docker Compose with collector
+
+```yaml
+services:
+  kite-collector:
+    build: .
+    command: ["agent", "--stream", "--config", "/etc/kite/config.yaml"]
+    environment:
+      KITE_STREAMING_OTLP_ENDPOINT: "otelcol:4318"
+      KITE_STREAMING_OTLP_PROTOCOL: "http"
+    depends_on: [otelcol]
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    command: ["--config", "/etc/otelcol/config.yaml"]
+    ports:
+      - "4318:4318"
+```
+
+### Retry behavior
+
+The emitter retries transient failures (5xx, 429, connection errors) with exponential backoff -- 3 attempts, starting at 1s, capped at 30s. Client errors (4xx) are not retried.
+
+### Verify the pipeline
+
+```bash
+make test-otlp
+```
+
+This starts a collector, runs a streaming scan, and verifies events arrive at the collector.
 
 ## Security
 
