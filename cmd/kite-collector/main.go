@@ -25,6 +25,7 @@ import (
 	"github.com/vulnertrack/kite-collector/api/rest"
 	"github.com/vulnertrack/kite-collector/internal/autodiscovery"
 	"github.com/vulnertrack/kite-collector/internal/dashboard"
+	"github.com/vulnertrack/kite-collector/internal/endpoint"
 	"github.com/vulnertrack/kite-collector/internal/enrollment"
 	kiteerrors "github.com/vulnertrack/kite-collector/internal/errors"
 	"github.com/vulnertrack/kite-collector/internal/identity"
@@ -112,6 +113,7 @@ lifecycle events for downstream consumption.`,
 		newErrorCmd(),
 		newEnrollCmd(),
 		newEndpointsCmd(),
+		newTrustCmd(),
 	)
 
 	return root
@@ -2175,6 +2177,66 @@ func runEndpoints(cfgFile string) error {
 	if flushErr := tw.Flush(); flushErr != nil {
 		logger.Warn("flush table writer", "error", flushErr)
 	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// trust command
+// ---------------------------------------------------------------------------
+
+func newTrustCmd() *cobra.Command {
+	var (
+		cfgFile  string
+		dataDir  string
+		acceptFP bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "trust <endpoint-name>",
+		Short: "Manage TOFU certificate pinning for an endpoint",
+		Long: `Reset the pinned server certificate fingerprint for the named endpoint.
+This is required when the server's TLS certificate has been legitimately
+rotated, causing a TOFU fingerprint mismatch.
+
+Example:
+  kite-collector trust primary --accept-new-fingerprint`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !acceptFP {
+				return fmt.Errorf("use --accept-new-fingerprint to confirm")
+			}
+			return runTrust(args[0], cfgFile, dataDir)
+		},
+	}
+
+	cmd.Flags().StringVar(&cfgFile, "config", "kite-collector.yaml", "path to configuration file")
+	cmd.Flags().StringVar(&dataDir, "data-dir", "", "override identity data directory")
+	cmd.Flags().BoolVar(&acceptFP, "accept-new-fingerprint", false, "confirm fingerprint reset")
+
+	return cmd
+}
+
+func runTrust(endpointName, cfgFile, dataDirOverride string) error {
+	logger := slog.Default()
+
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		logger.Warn("could not load config file, using defaults", "error", err)
+		cfg = &config.Config{}
+		cfg.Identity.DataDir = "/var/lib/kite-collector"
+	}
+
+	dd := cfg.Identity.DataDir
+	if dataDirOverride != "" {
+		dd = dataDirOverride
+	}
+
+	credDir := filepath.Join(dd, endpointName)
+	if err := endpoint.AcceptNewFingerprint(credDir, logger); err != nil {
+		return fmt.Errorf("reset fingerprint: %w", err)
+	}
+
+	fmt.Printf("Fingerprint for %q reset. Next connection will pin the new server certificate.\n", endpointName)
 	return nil
 }
 
