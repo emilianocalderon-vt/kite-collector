@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const (
@@ -34,11 +37,12 @@ type wazuhAuth struct {
 }
 
 // newAuth creates a new wazuhAuth instance.
+// Password is cloned to ensure heap allocation for ZeroString safety.
 func newAuth(endpoint, username, password string, client *http.Client) *wazuhAuth {
 	return &wazuhAuth{
 		endpoint: endpoint,
 		username: username,
-		password: password,
+		password: strings.Clone(password),
 		client:   client,
 	}
 }
@@ -91,6 +95,10 @@ func (a *wazuhAuth) getToken(ctx context.Context) (string, error) {
 
 	a.token = result.Data.Token
 	a.expiry = time.Now().Add(defaultTokenLifetime)
+
+	// Zero password after successful token acquisition (defense-in-depth).
+	safenet.ZeroString(&a.password)
+
 	return a.token, nil
 }
 

@@ -2,7 +2,6 @@ package wazuh
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/vulnertrack/kite-collector/internal/discovery/agent/software"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const (
@@ -54,12 +54,30 @@ func (w *Wazuh) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset
 		return nil, fmt.Errorf("wazuh: KITE_WAZUH_ENDPOINT, KITE_WAZUH_USERNAME, KITE_WAZUH_PASSWORD required")
 	}
 
-	endpoint = strings.TrimRight(endpoint, "/")
+	// Validate user-provided endpoints (skip for test override via baseURL).
+	if w.baseURL == "" {
+		valOpts := []safenet.Option{safenet.AllowPrivate()}
+		if safenet.ParseBoolEnv("KITE_WAZUH_INSECURE") {
+			valOpts = append(valOpts, safenet.AllowHTTP())
+		}
+		u, verr := safenet.ValidateEndpoint(endpoint, valOpts...)
+		if verr != nil {
+			return nil, fmt.Errorf("wazuh: %w", verr)
+		}
+		endpoint = strings.TrimRight(u.String(), "/")
+	} else {
+		endpoint = strings.TrimRight(endpoint, "/")
+	}
+
 	slog.Info("wazuh: starting discovery", "endpoint", sanitizeLogValue(endpoint)) //#nosec G706 -- sanitized via sanitizeLogValue
 
+	tlsCfg, err := safenet.TLSConfig("KITE_WAZUH_INSECURE", "KITE_WAZUH_CA_CERT")
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: %w", err)
+	}
 	httpClient := &http.Client{
 		Timeout:   clientTimeout,
-		Transport: &http.Transport{TLSClientConfig: wazuhTLSConfig()},
+		Transport: &http.Transport{TLSClientConfig: tlsCfg},
 	}
 
 	auth := newAuth(endpoint, username, password, httpClient)
@@ -120,73 +138,74 @@ func (w *Wazuh) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset
 			continue
 		}
 
-		wg.Add(1)
-		go func(idx int, agent wazuhAgent) {
-			defer wg.Done()
+		safenet.SafeGo(&wg, slog.Default(), fmt.Sprintf("wazuh-enrich-%s", ag.ID), func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			rctx, cancel := safenet.WithResourceDeadline(ctx, 60*time.Second)
+			defer cancel()
+
 			if collectPkgs {
-				pkgs, pkgErr := client.listAllPackages(ctx, agent.ID)
+				pkgs, pkgErr := client.listAllPackages(rctx, ag.ID)
 				if pkgErr != nil {
-					slog.Warn("wazuh: packages failed", "agent", agent.ID, "error", pkgErr)
+					slog.Warn("wazuh: packages failed", "agent", ag.ID, "error", pkgErr)
 				} else {
-					results[idx].pkgs = pkgs
+					results[i].pkgs = pkgs
 				}
 			}
 
 			if collectVulns {
-				vulns, vulnErr := client.listAllVulnerabilities(ctx, agent.ID)
+				vulns, vulnErr := client.listAllVulnerabilities(rctx, ag.ID)
 				if vulnErr != nil {
-					slog.Warn("wazuh: vulnerabilities failed", "agent", agent.ID, "error", vulnErr)
+					slog.Warn("wazuh: vulnerabilities failed", "agent", ag.ID, "error", vulnErr)
 				} else {
-					results[idx].vulns = vulns
+					results[i].vulns = vulns
 				}
 			}
 
 			if collectSCA {
-				policies, scaErr := client.listSCAPolicies(ctx, agent.ID)
+				policies, scaErr := client.listSCAPolicies(rctx, ag.ID)
 				if scaErr != nil {
-					slog.Warn("wazuh: SCA policies failed", "agent", agent.ID, "error", scaErr)
+					slog.Warn("wazuh: SCA policies failed", "agent", ag.ID, "error", scaErr)
 				} else {
-					results[idx].sca = policies
-					results[idx].checks = make(map[string][]wazuhSCACheck)
+					results[i].sca = policies
+					results[i].checks = make(map[string][]wazuhSCACheck)
 					for _, p := range policies {
-						checks, chkErr := client.listSCAChecks(ctx, agent.ID, p.PolicyID)
+						checks, chkErr := client.listSCAChecks(rctx, ag.ID, p.PolicyID)
 						if chkErr != nil {
 							slog.Warn("wazuh: SCA checks failed",
-								"agent", agent.ID, "policy", p.PolicyID, "error", chkErr)
+								"agent", ag.ID, "policy", p.PolicyID, "error", chkErr)
 						} else {
-							results[idx].checks[p.PolicyID] = checks
+							results[i].checks[p.PolicyID] = checks
 						}
 					}
 				}
 			}
 
 			if collectPorts {
-				ports, portErr := client.listPorts(ctx, agent.ID)
+				ports, portErr := client.listPorts(rctx, ag.ID)
 				if portErr != nil {
-					slog.Warn("wazuh: ports failed", "agent", agent.ID, "error", portErr)
+					slog.Warn("wazuh: ports failed", "agent", ag.ID, "error", portErr)
 				} else {
-					results[idx].ports = ports
+					results[i].ports = ports
 				}
 			}
 
 			if collectIfaces {
-				nifaces, ifErr := client.listNetInterfaces(ctx, agent.ID)
+				nifaces, ifErr := client.listNetInterfaces(rctx, ag.ID)
 				if ifErr != nil {
-					slog.Warn("wazuh: interfaces failed", "agent", agent.ID, "error", ifErr)
+					slog.Warn("wazuh: interfaces failed", "agent", ag.ID, "error", ifErr)
 				} else {
-					results[idx].ifaces = nifaces
+					results[i].ifaces = nifaces
 				}
-				naddrs, addrErr := client.listNetAddresses(ctx, agent.ID)
+				naddrs, addrErr := client.listNetAddresses(rctx, ag.ID)
 				if addrErr != nil {
-					slog.Warn("wazuh: addresses failed", "agent", agent.ID, "error", addrErr)
+					slog.Warn("wazuh: addresses failed", "agent", ag.ID, "error", addrErr)
 				} else {
-					results[idx].addrs = naddrs
+					results[i].addrs = naddrs
 				}
 			}
-		}(i, ag)
+		})
 	}
 	wg.Wait()
 
@@ -273,8 +292,12 @@ type wazuhResponse struct {
 func (c *wazuhClient) listPaginated(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var all []json.RawMessage
 	offset := 0
+	guard := safenet.NewPaginationGuard()
 
 	for {
+		if err := guard.Next(); err != nil {
+			return all, err
+		}
 		if ctx.Err() != nil {
 			return all, ctx.Err()
 		}
@@ -368,7 +391,11 @@ type wazuhPackage struct {
 }
 
 func (c *wazuhClient) listAllPackages(ctx context.Context, agentID string) ([]wazuhPackage, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/packages", agentID))
+	safeID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/packages", safeID))
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +427,11 @@ type wazuhVulnerability struct {
 }
 
 func (c *wazuhClient) listAllVulnerabilities(ctx context.Context, agentID string) ([]wazuhVulnerability, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/vulnerability/%s", agentID))
+	safeID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/vulnerability/%s", safeID))
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +476,11 @@ type wazuhSCACompliance struct {
 }
 
 func (c *wazuhClient) listSCAPolicies(ctx context.Context, agentID string) ([]wazuhSCAPolicy, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/sca/%s", agentID))
+	safeID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/sca/%s", safeID))
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +497,15 @@ func (c *wazuhClient) listSCAPolicies(ctx context.Context, agentID string) ([]wa
 }
 
 func (c *wazuhClient) listSCAChecks(ctx context.Context, agentID, policyID string) ([]wazuhSCACheck, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/sca/%s/checks/%s", agentID, policyID))
+	safeAgentID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	safePolicyID, err := safenet.SanitizePathSegment(policyID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe policy ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/sca/%s/checks/%s", safeAgentID, safePolicyID))
 	if err != nil {
 		return nil, err
 	}
@@ -493,7 +536,11 @@ type wazuhPort struct {
 }
 
 func (c *wazuhClient) listPorts(ctx context.Context, agentID string) ([]wazuhPort, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/ports", agentID))
+	safeID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/ports", safeID))
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +577,11 @@ type wazuhNetAddr struct {
 }
 
 func (c *wazuhClient) listNetInterfaces(ctx context.Context, agentID string) ([]wazuhNetIface, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/netiface", agentID))
+	safeID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/netiface", safeID))
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +598,11 @@ func (c *wazuhClient) listNetInterfaces(ctx context.Context, agentID string) ([]
 }
 
 func (c *wazuhClient) listNetAddresses(ctx context.Context, agentID string) ([]wazuhNetAddr, error) {
-	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/netaddr", agentID))
+	safeID, err := safenet.SanitizePathSegment(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("wazuh: unsafe agent ID: %w", err)
+	}
+	items, err := c.listPaginated(ctx, fmt.Sprintf("/syscollector/%s/netaddr", safeID))
 	if err != nil {
 		return nil, err
 	}
@@ -781,19 +836,6 @@ func agentToAsset(
 	}
 	asset.ComputeNaturalKey()
 	return asset
-}
-
-// -------------------------------------------------------------------------
-// TLS config
-// -------------------------------------------------------------------------
-
-func wazuhTLSConfig() *tls.Config {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	if os.Getenv("KITE_WAZUH_INSECURE") == "true" {
-		slog.Warn("wazuh: TLS verification disabled — not recommended for production")
-		cfg.InsecureSkipVerify = true //#nosec G402 -- user-opted insecure mode for self-signed certs
-	}
-	return cfg
 }
 
 // -------------------------------------------------------------------------

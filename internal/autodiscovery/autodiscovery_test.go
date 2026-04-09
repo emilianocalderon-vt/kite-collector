@@ -215,11 +215,11 @@ func TestProbePorts_ContextCancelled(t *testing.T) {
 
 func TestFingerprint_BodyMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `{"title": "Wazuh API", "version": "4.9.0"}`)
+		_, _ = fmt.Fprint(w, `{"title": "Wazuh API REST", "version": "4.9.0"}`)
 	}))
 	defer srv.Close()
 
-	ok, _ := fingerprint(context.Background(), srv.URL, "/", "Wazuh", 3*time.Second)
+	ok, _ := fingerprint(context.Background(), srv.URL, "/", "Wazuh API REST", 3*time.Second)
 	assert.True(t, ok)
 }
 

@@ -16,7 +16,6 @@ package unifi
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,6 +30,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const (
@@ -279,7 +279,12 @@ func (u *UniFi) discoverLocal(ctx context.Context, cfg map[string]any) ([]model.
 				"KITE_UNIFI_PASSWORD (local)")
 	}
 
-	endpoint = strings.TrimRight(endpoint, "/")
+	// Validate endpoint — UniFi controllers may use HTTP on LAN.
+	parsed, err := safenet.ValidateEndpoint(endpoint, safenet.AllowPrivate(), safenet.AllowHTTP())
+	if err != nil {
+		return nil, fmt.Errorf("unifi: %w", err)
+	}
+	endpoint = strings.TrimRight(parsed.String(), "/")
 
 	slog.Info("unifi: using local API", slog.String("endpoint", sanitizeLogValue(endpoint)), slog.String("site", sanitizeLogValue(site))) //#nosec G706 -- control chars sanitized; operator-configured values
 
@@ -287,6 +292,8 @@ func (u *UniFi) discoverLocal(ctx context.Context, cfg map[string]any) ([]model.
 	if err != nil {
 		return nil, fmt.Errorf("unifi: login failed: %w", err)
 	}
+	// Zero password after successful login (defense-in-depth).
+	safenet.ZeroString(&password)
 	defer client.logout(ctx)
 
 	now := time.Now().UTC()
@@ -327,23 +334,17 @@ type localClient struct {
 
 func newLocalClient(ctx context.Context, endpoint, username, password string) (*localClient, error) {
 	parsed, err := url.Parse(endpoint)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, fmt.Errorf("invalid endpoint URL %q: scheme must be http or https", endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid endpoint URL %q: %w", endpoint, err)
 	}
 
 	jar, _ := cookiejar.New(nil)
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
+	tlsCfg, err := safenet.TLSConfig("KITE_UNIFI_INSECURE", "KITE_UNIFI_CA_CERT")
+	if err != nil {
+		return nil, fmt.Errorf("unifi: %w", err)
 	}
-
-	// Accept self-signed certs if KITE_UNIFI_INSECURE is set.
-	if os.Getenv("KITE_UNIFI_INSECURE") == "true" {
-		slog.Warn("unifi: TLS verification disabled — not recommended for production")
-		transport.TLSClientConfig.InsecureSkipVerify = true //#nosec G402 -- user-opted insecure mode
-	}
+	transport := &http.Transport{TLSClientConfig: tlsCfg}
 
 	c := &localClient{
 		base: parsed,
@@ -501,7 +502,11 @@ type unifiDevice struct {
 // -------------------------------------------------------------------------
 
 func (c *localClient) listClients(ctx context.Context, site string) ([]unifiClientEntry, error) {
-	body, err := c.get(ctx, fmt.Sprintf("/api/s/%s/stat/sta", site))
+	safeSite, err := safenet.SanitizePathSegment(site)
+	if err != nil {
+		return nil, fmt.Errorf("unifi: unsafe site name: %w", err)
+	}
+	body, err := c.get(ctx, fmt.Sprintf("/api/s/%s/stat/sta", safeSite))
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +522,11 @@ func (c *localClient) listClients(ctx context.Context, site string) ([]unifiClie
 }
 
 func (c *localClient) listDevices(ctx context.Context, site string) ([]unifiDevice, error) {
-	body, err := c.get(ctx, fmt.Sprintf("/api/s/%s/stat/device", site))
+	safeSite, err := safenet.SanitizePathSegment(site)
+	if err != nil {
+		return nil, fmt.Errorf("unifi: unsafe site name: %w", err)
+	}
+	body, err := c.get(ctx, fmt.Sprintf("/api/s/%s/stat/device", safeSite))
 	if err != nil {
 		return nil, err
 	}

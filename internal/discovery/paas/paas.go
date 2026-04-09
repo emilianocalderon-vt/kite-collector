@@ -7,6 +7,7 @@ package paas
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,6 +73,17 @@ func newClient(name, base string, auth authFunc) *apiClient {
 		http:    &http.Client{Timeout: clientTimeout},
 		headers: make(map[string]string),
 	}
+}
+
+// newClientWithTLS creates a new API client with a custom TLS configuration.
+// Used by self-hosted connectors (Coolify, CapRover) that may need custom CA
+// certs or InsecureSkipVerify for local development.
+func newClientWithTLS(name, base string, auth authFunc, tlsCfg *tls.Config) *apiClient {
+	c := newClient(name, base, auth)
+	if tlsCfg != nil {
+		c.http.Transport = &http.Transport{TLSClientConfig: tlsCfg}
+	}
+	return c
 }
 
 // applyHeaders sets auth, default Accept, and custom headers on a request.

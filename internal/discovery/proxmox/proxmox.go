@@ -5,7 +5,6 @@ package proxmox
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const clientTimeout = 30 * time.Second
@@ -46,11 +46,22 @@ func (p *Proxmox) Discover(ctx context.Context, cfg map[string]any) ([]model.Ass
 		return nil, fmt.Errorf("proxmox: KITE_PROXMOX_ENDPOINT, KITE_PROXMOX_TOKEN_ID, and KITE_PROXMOX_TOKEN_SECRET are required")
 	}
 
+	valOpts := []safenet.Option{safenet.AllowPrivate()}
+	if safenet.ParseBoolEnv("KITE_PROXMOX_INSECURE") {
+		valOpts = append(valOpts, safenet.AllowHTTP())
+	}
+	if _, err := safenet.ValidateEndpoint(endpoint, valOpts...); err != nil {
+		return nil, fmt.Errorf("proxmox: %w", err)
+	}
+
 	endpoint = strings.TrimRight(endpoint, "/")
 
 	slog.Info("proxmox: starting discovery", "endpoint", endpoint) //#nosec G706 -- structured slog
 
-	client := newPVEClient(endpoint, tokenID, tokenSecret)
+	client, err := newPVEClient(endpoint, tokenID, tokenSecret)
+	if err != nil {
+		return nil, err
+	}
 
 	nodes, err := client.listNodes(ctx)
 	if err != nil {
@@ -110,18 +121,22 @@ type pveClient struct {
 	tokenSecret string
 }
 
-func newPVEClient(endpoint, tokenID, tokenSecret string) *pveClient {
+func newPVEClient(endpoint, tokenID, tokenSecret string) (*pveClient, error) {
+	tc, err := safenet.TLSConfig("KITE_PROXMOX_INSECURE", "KITE_PROXMOX_CA_CERT")
+	if err != nil {
+		return nil, fmt.Errorf("proxmox TLS: %w", err)
+	}
 	return &pveClient{
 		http: &http.Client{
 			Timeout: clientTimeout,
 			Transport: &http.Transport{
-				TLSClientConfig: tlsConfig(),
+				TLSClientConfig: tc,
 			},
 		},
 		base:        endpoint,
 		tokenID:     tokenID,
 		tokenSecret: tokenSecret,
-	}
+	}, nil
 }
 
 func (c *pveClient) get(ctx context.Context, path string) ([]byte, error) {
@@ -147,19 +162,6 @@ func (c *pveClient) get(ctx context.Context, path string) ([]byte, error) {
 	}
 
 	return body, nil
-}
-
-// -------------------------------------------------------------------------
-// TLS config — Proxmox uses self-signed certs by default
-// -------------------------------------------------------------------------
-
-func tlsConfig() *tls.Config {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	if os.Getenv("KITE_PROXMOX_INSECURE") == "true" {
-		slog.Warn("proxmox: TLS verification disabled — not recommended for production")
-		cfg.InsecureSkipVerify = true //#nosec G402 -- user-opted insecure mode
-	}
-	return cfg
 }
 
 // -------------------------------------------------------------------------
@@ -229,7 +231,11 @@ func (c *pveClient) listNodes(ctx context.Context) ([]pveNode, error) {
 }
 
 func (c *pveClient) listVMs(ctx context.Context, node string) ([]pveVM, error) {
-	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu", node))
+	safeNode, err := safenet.SanitizePathSegment(node)
+	if err != nil {
+		return nil, fmt.Errorf("invalid node name: %w", err)
+	}
+	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu", safeNode))
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +251,11 @@ func (c *pveClient) listVMs(ctx context.Context, node string) ([]pveVM, error) {
 }
 
 func (c *pveClient) listLXC(ctx context.Context, node string) ([]pveLXC, error) {
-	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/lxc", node))
+	safeNode, err := safenet.SanitizePathSegment(node)
+	if err != nil {
+		return nil, fmt.Errorf("invalid node name: %w", err)
+	}
+	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/lxc", safeNode))
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +271,11 @@ func (c *pveClient) listLXC(ctx context.Context, node string) ([]pveLXC, error) 
 }
 
 func (c *pveClient) getVMConfig(ctx context.Context, node string, vmid int) (*vmConfig, error) {
-	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/config", node, vmid))
+	safeNode, err := safenet.SanitizePathSegment(node)
+	if err != nil {
+		return nil, fmt.Errorf("invalid node name: %w", err)
+	}
+	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/config", safeNode, vmid))
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +291,11 @@ func (c *pveClient) getVMConfig(ctx context.Context, node string, vmid int) (*vm
 }
 
 func (c *pveClient) listSnapshots(ctx context.Context, node string, vmid int) ([]snapshot, error) {
-	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/snapshot", node, vmid))
+	safeNode, err := safenet.SanitizePathSegment(node)
+	if err != nil {
+		return nil, fmt.Errorf("invalid node name: %w", err)
+	}
+	body, err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/snapshot", safeNode, vmid))
 	if err != nil {
 		return nil, err
 	}

@@ -196,6 +196,7 @@ func TestProxmox_Discover_AuthFailure(t *testing.T) {
 	t.Setenv("KITE_PROXMOX_ENDPOINT", srv.URL)
 	t.Setenv("KITE_PROXMOX_TOKEN_ID", "wrong")
 	t.Setenv("KITE_PROXMOX_TOKEN_SECRET", "wrong")
+	t.Setenv("KITE_PROXMOX_INSECURE", "true")
 
 	p := New()
 	_, err := p.Discover(context.Background(), map[string]any{})

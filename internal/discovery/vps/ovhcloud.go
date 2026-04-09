@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // OVHcloud implements discovery.Source for the OVHcloud API.
@@ -100,9 +101,15 @@ func (o *OVHcloud) discoverDedicated(ctx context.Context, client *apiClient, bas
 			return assets, ctx.Err()
 		}
 
+		safeName, sErr := safenet.SanitizePathSegment(name)
+		if sErr != nil {
+			slog.Warn("ovhcloud: skipping dedicated server with unsafe name", "name", sanitizeLogValue(name), "error", sErr)
+			continue
+		}
+
 		var srv ovhDedicatedServer
-		if err := client.get(ctx, "/dedicated/server/"+name, &srv); err != nil {
-			slog.Warn("ovhcloud: get dedicated server failed", "name", name, "error", err)
+		if err := client.get(ctx, "/dedicated/server/"+safeName, &srv); err != nil {
+			slog.Warn("ovhcloud: get dedicated server failed", "name", safeName, "error", err)
 			continue
 		}
 		assets = append(assets, ovhDedicatedToAsset(srv, now))
@@ -125,9 +132,15 @@ func (o *OVHcloud) discoverVPS(ctx context.Context, client *apiClient, base stri
 			return assets, ctx.Err()
 		}
 
+		safeName, sErr := safenet.SanitizePathSegment(name)
+		if sErr != nil {
+			slog.Warn("ovhcloud: skipping VPS with unsafe name", "name", sanitizeLogValue(name), "error", sErr)
+			continue
+		}
+
 		var instance ovhVPS
-		if err := client.get(ctx, "/vps/"+name, &instance); err != nil {
-			slog.Warn("ovhcloud: get VPS failed", "name", name, "error", err)
+		if err := client.get(ctx, "/vps/"+safeName, &instance); err != nil {
+			slog.Warn("ovhcloud: get VPS failed", "name", safeName, "error", err)
 			continue
 		}
 		assets = append(assets, ovhVPSToAsset(instance, now))

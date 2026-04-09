@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // FlyIO implements discovery.Source for the Fly.io Machines API.
@@ -59,8 +60,17 @@ func (f *FlyIO) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset
 			return assets, ctx.Err()
 		}
 
+		safeName, err := safenet.SanitizePathSegment(app.Name)
+		if err != nil {
+			slog.Warn("flyio: invalid app name, skipping",
+				"app", sanitizeLogValue(app.Name),
+				"error", err,
+			)
+			continue
+		}
+
 		var machines []flyMachine
-		if err := client.get(ctx, "/v1/apps/"+url.PathEscape(app.Name)+"/machines", &machines); err != nil {
+		if err := client.get(ctx, "/v1/apps/"+safeName+"/machines", &machines); err != nil {
 			slog.Warn("flyio: list machines failed, skipping app",
 				"app", sanitizeLogValue(app.Name),
 				"error", err,

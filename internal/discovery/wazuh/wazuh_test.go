@@ -292,6 +292,7 @@ func TestWazuh_Discover_Success(t *testing.T) {
 	t.Setenv("KITE_WAZUH_ENDPOINT", srv.URL)
 	t.Setenv("KITE_WAZUH_USERNAME", "admin")
 	t.Setenv("KITE_WAZUH_PASSWORD", "secret")
+	t.Setenv("KITE_WAZUH_INSECURE", "true")
 
 	w := New()
 	assets, err := w.Discover(context.Background(), map[string]any{
@@ -413,6 +414,7 @@ func TestWazuh_Discover_AuthFailure(t *testing.T) {
 	t.Setenv("KITE_WAZUH_ENDPOINT", srv.URL)
 	t.Setenv("KITE_WAZUH_USERNAME", "admin")
 	t.Setenv("KITE_WAZUH_PASSWORD", "wrong")
+	t.Setenv("KITE_WAZUH_INSECURE", "true")
 
 	w := New()
 	_, err := w.Discover(context.Background(), map[string]any{})
@@ -427,6 +429,7 @@ func TestWazuh_Discover_EndpointFromConfig(t *testing.T) {
 	t.Setenv("KITE_WAZUH_ENDPOINT", "")
 	t.Setenv("KITE_WAZUH_USERNAME", "admin")
 	t.Setenv("KITE_WAZUH_PASSWORD", "secret")
+	t.Setenv("KITE_WAZUH_INSECURE", "true")
 
 	w := New()
 	assets, err := w.Discover(context.Background(), map[string]any{
@@ -443,6 +446,7 @@ func TestWazuh_Discover_MaxAgents(t *testing.T) {
 	t.Setenv("KITE_WAZUH_ENDPOINT", srv.URL)
 	t.Setenv("KITE_WAZUH_USERNAME", "admin")
 	t.Setenv("KITE_WAZUH_PASSWORD", "secret")
+	t.Setenv("KITE_WAZUH_INSECURE", "true")
 
 	w := New()
 	assets, err := w.Discover(context.Background(), map[string]any{

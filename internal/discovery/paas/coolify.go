@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // Coolify implements discovery.Source for the Coolify REST API.
@@ -53,9 +54,19 @@ func (c *Coolify) Discover(ctx context.Context, cfg map[string]any) ([]model.Ass
 		return nil, nil
 	}
 
+	if c.baseURL == "" {
+		if _, err := safenet.ValidateEndpoint(endpoint, safenet.AllowPrivate()); err != nil {
+			return nil, fmt.Errorf("coolify: %w", err)
+		}
+	}
+
 	slog.Info("coolify: starting discovery", "endpoint", sanitizeLogValue(endpoint)) //#nosec G706 -- control chars sanitized; operator-configured env var
 
-	client := newClient("coolify", endpoint, bearerAuth(token))
+	tlsCfg, tlsErr := safenet.TLSConfig("KITE_COOLIFY_INSECURE", "KITE_COOLIFY_CA_CERT")
+	if tlsErr != nil {
+		return nil, fmt.Errorf("coolify: %w", tlsErr)
+	}
+	client := newClientWithTLS("coolify", endpoint, bearerAuth(token), tlsCfg)
 	var assets []model.Asset
 	now := time.Now().UTC()
 

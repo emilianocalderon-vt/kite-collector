@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // Heroku implements discovery.Source for the Heroku Platform API.
@@ -42,8 +43,12 @@ func (h *Heroku) Discover(ctx context.Context, cfg map[string]any) ([]model.Asse
 
 	var assets []model.Asset
 	rangeHeader := "id ..; max=200"
+	guard := safenet.NewPaginationGuard()
 
 	for {
+		if err := guard.Next(); err != nil {
+			return assets, fmt.Errorf("heroku: %w", err)
+		}
 		if ctx.Err() != nil {
 			return assets, ctx.Err()
 		}

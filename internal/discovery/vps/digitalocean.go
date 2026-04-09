@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // DigitalOcean implements discovery.Source for the DigitalOcean API.
@@ -39,8 +40,12 @@ func (d *DigitalOcean) Discover(ctx context.Context, cfg map[string]any) ([]mode
 
 	client := newClient("digitalocean", d.baseURL, bearerAuth(token))
 	var assets []model.Asset
+	guard := safenet.NewPaginationGuard()
 
 	for page := 1; ; page++ {
+		if err := guard.Next(); err != nil {
+			return assets, fmt.Errorf("digitalocean: %w", err)
+		}
 		if ctx.Err() != nil {
 			return assets, ctx.Err()
 		}

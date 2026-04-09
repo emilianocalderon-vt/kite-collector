@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const renderPageSize = 100
@@ -43,8 +44,12 @@ func (r *Render) Discover(ctx context.Context, cfg map[string]any) ([]model.Asse
 	client := newClient("render", r.baseURL, bearerAuth(token))
 	var assets []model.Asset
 	cursor := ""
+	guard := safenet.NewPaginationGuard()
 
 	for {
+		if err := guard.Next(); err != nil {
+			return assets, fmt.Errorf("render: %w", err)
+		}
 		if ctx.Err() != nil {
 			return assets, ctx.Err()
 		}

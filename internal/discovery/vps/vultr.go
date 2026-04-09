@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // Vultr implements discovery.Source for the Vultr API v2.
@@ -40,8 +41,12 @@ func (v *Vultr) Discover(ctx context.Context, cfg map[string]any) ([]model.Asset
 	client := newClient("vultr", v.baseURL, bearerAuth(token))
 	var assets []model.Asset
 	cursor := ""
+	guard := safenet.NewPaginationGuard()
 
 	for {
+		if err := guard.Next(); err != nil {
+			return assets, fmt.Errorf("vultr: %w", err)
+		}
 		if ctx.Err() != nil {
 			return assets, ctx.Err()
 		}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const vercelPageSize = 100
@@ -42,8 +43,12 @@ func (v *Vercel) Discover(ctx context.Context, cfg map[string]any) ([]model.Asse
 	client := newClient("vercel", v.baseURL, bearerAuth(token))
 	var assets []model.Asset
 	var until string
+	guard := safenet.NewPaginationGuard()
 
 	for {
+		if err := guard.Next(); err != nil {
+			return assets, fmt.Errorf("vercel: %w", err)
+		}
 		if ctx.Err() != nil {
 			return assets, ctx.Err()
 		}

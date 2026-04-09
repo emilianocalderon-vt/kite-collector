@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // CapRover implements discovery.Source for the CapRover REST API.
@@ -53,9 +54,19 @@ func (cr *CapRover) Discover(ctx context.Context, cfg map[string]any) ([]model.A
 		return nil, nil
 	}
 
+	if cr.baseURL == "" {
+		if _, err := safenet.ValidateEndpoint(endpoint, safenet.AllowPrivate()); err != nil {
+			return nil, fmt.Errorf("caprover: %w", err)
+		}
+	}
+
 	slog.Info("caprover: starting discovery", "endpoint", sanitizeLogValue(endpoint)) //#nosec G706 -- control chars sanitized; operator-configured env var
 
-	client := newClient("caprover", endpoint, captainAuth(token))
+	tlsCfg, tlsErr := safenet.TLSConfig("KITE_CAPROVER_INSECURE", "KITE_CAPROVER_CA_CERT")
+	if tlsErr != nil {
+		return nil, fmt.Errorf("caprover: %w", tlsErr)
+	}
+	client := newClientWithTLS("caprover", endpoint, captainAuth(token), tlsCfg)
 
 	var resp caproverAppsResponse
 	if err := client.get(ctx, "/api/v2/user/apps/appDefinitions", &resp); err != nil {

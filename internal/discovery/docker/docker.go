@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const (
@@ -208,7 +209,11 @@ func (c *dockerClient) listContainers(ctx context.Context) ([]containerSummary, 
 }
 
 func (c *dockerClient) inspectContainer(ctx context.Context, id string) (*containerDetail, error) {
-	body, err := c.get(ctx, "/containers/"+id+"/json")
+	safeID, err := safenet.SanitizePathSegment(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid container ID: %w", err)
+	}
+	body, err := c.get(ctx, "/containers/"+safeID+"/json")
 	if err != nil {
 		return nil, err
 	}

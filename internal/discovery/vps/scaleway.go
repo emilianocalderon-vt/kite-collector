@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vulnertrack/kite-collector/internal/model"
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // Scaleway implements discovery.Source for the Scaleway Instance API.
@@ -50,8 +51,12 @@ func (s *Scaleway) Discover(ctx context.Context, cfg map[string]any) ([]model.As
 	})
 
 	var assets []model.Asset
+	guard := safenet.NewPaginationGuard()
 
 	for page := 1; ; page++ {
+		if err := guard.Next(); err != nil {
+			return assets, fmt.Errorf("scaleway: %w", err)
+		}
 		if ctx.Err() != nil {
 			return assets, ctx.Err()
 		}
