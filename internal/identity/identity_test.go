@@ -90,3 +90,59 @@ func TestLoadOrCreate_RejectsInsecurePermissions(t *testing.T) {
 	// Verify we can still use the originally loaded identity.
 	assert.NotNil(t, id)
 }
+
+func TestDeriveStorageKey_Returns32Bytes(t *testing.T) {
+	dir := t.TempDir()
+	id, err := LoadOrCreate(dir, slog.Default())
+	require.NoError(t, err)
+
+	key, err := id.DeriveStorageKey()
+	require.NoError(t, err)
+	assert.Len(t, key, 32, "AES-256 key must be 32 bytes")
+}
+
+func TestDeriveStorageKey_Deterministic(t *testing.T) {
+	dir := t.TempDir()
+	id, err := LoadOrCreate(dir, slog.Default())
+	require.NoError(t, err)
+
+	key1, err := id.DeriveStorageKey()
+	require.NoError(t, err)
+
+	key2, err := id.DeriveStorageKey()
+	require.NoError(t, err)
+
+	assert.Equal(t, key1, key2, "same identity must derive the same key")
+}
+
+func TestDeriveStorageKey_DifferentIdentitiesProduceDifferentKeys(t *testing.T) {
+	id1, err := LoadOrCreate(t.TempDir(), slog.Default())
+	require.NoError(t, err)
+
+	id2, err := LoadOrCreate(t.TempDir(), slog.Default())
+	require.NoError(t, err)
+
+	key1, err := id1.DeriveStorageKey()
+	require.NoError(t, err)
+	key2, err := id2.DeriveStorageKey()
+	require.NoError(t, err)
+
+	assert.NotEqual(t, key1, key2, "different identities must derive different keys")
+}
+
+func TestDeriveStorageKey_SurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+
+	id1, err := LoadOrCreate(dir, slog.Default())
+	require.NoError(t, err)
+	key1, err := id1.DeriveStorageKey()
+	require.NoError(t, err)
+
+	// Reload identity from disk.
+	id2, err := LoadOrCreate(dir, slog.Default())
+	require.NoError(t, err)
+	key2, err := id2.DeriveStorageKey()
+	require.NoError(t, err)
+
+	assert.Equal(t, key1, key2, "reloaded identity must derive the same key")
+}

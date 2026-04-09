@@ -53,6 +53,12 @@ func New(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
+// RawDB returns the underlying *sql.DB connection for raw queries.
+// Use with care — this bypasses the Store interface.
+func (s *SQLiteStore) RawDB() *sql.DB {
+	return s.db
+}
+
 // Close releases the underlying database connection pool.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()

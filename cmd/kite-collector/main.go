@@ -64,6 +64,57 @@ var (
 )
 
 // ---------------------------------------------------------------------------
+// Encrypted SQLite helper
+// ---------------------------------------------------------------------------
+
+// openSQLiteStore opens a SQLite database with at-rest encryption.
+// It loads (or creates) the agent identity from identityDir, derives an
+// AES-256 key via HKDF, and opens an EncryptedStore that keeps the
+// decrypted working copy on a RAM-backed filesystem when available.
+//
+// If identityDir is empty, it defaults to the directory containing dbPath.
+func openSQLiteStore(dbPath string, identityCfg config.IdentityConfig) (*sqlite.EncryptedStore, error) {
+	dataDir := identityCfg.DataDir
+	dbDir := filepath.Dir(dbPath)
+
+	// Use configured identity dir if writable, otherwise fall back to the
+	// directory containing the database file. This avoids permission errors
+	// when the default /var/lib/kite-collector is not accessible (non-root).
+	if dataDir == "" {
+		dataDir = dbDir
+	} else if err := os.MkdirAll(dataDir, 0700); err != nil {
+		slog.Warn("configured identity.data_dir is not writable, "+
+			"falling back to database directory",
+			"configured", dataDir, "fallback", dbDir, "error", err)
+		dataDir = dbDir
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("create identity dir %s: %w", dataDir, err)
+	}
+
+	id, err := identity.LoadOrCreate(dataDir, slog.Default())
+	if err != nil {
+		return nil, fmt.Errorf("load agent identity: %w", err)
+	}
+
+	key, err := id.DeriveStorageKey()
+	if err != nil {
+		return nil, fmt.Errorf("derive storage key: %w", err)
+	}
+
+	backend := identityCfg.KeyBackend
+	if backend == "" {
+		backend = "auto"
+	}
+
+	es, err := sqlite.NewEncrypted(dbPath, key, backend, slog.Default())
+	if err != nil {
+		return nil, fmt.Errorf("open encrypted store: %w", err)
+	}
+	return es, nil
+}
+
+// ---------------------------------------------------------------------------
 // Diff types
 // ---------------------------------------------------------------------------
 
@@ -235,12 +286,13 @@ func runScan(cfgFile string, scope []string, output, dbPath string, sources []st
 		return fmt.Errorf("create data dir %s: %w", dataDir, err)
 	}
 
-	// Open SQLite store and run migrations.
-	st, err := sqlite.New(dbPath)
+	// Open encrypted SQLite store and run migrations.
+	encStore, err := openSQLiteStore(dbPath, cfg.Identity)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = encStore.Close() }()
+	st := encStore.Store
 
 	if err = st.Migrate(ctx); err != nil {
 		return fmt.Errorf("migrate store: %w", err)
@@ -403,24 +455,24 @@ func runDiff(db1Path, db2Path, output string, showUnchanged bool) error {
 	ctx := context.Background()
 
 	// Open both databases.
-	st1, err := sqlite.New(db1Path)
+	enc1, err := openSQLiteStore(db1Path, config.IdentityConfig{})
 	if err != nil {
 		return fmt.Errorf("open db1 %s: %w", db1Path, err)
 	}
-	defer func() { _ = st1.Close() }()
+	defer func() { _ = enc1.Close() }()
 
-	st2, err := sqlite.New(db2Path)
+	enc2, err := openSQLiteStore(db2Path, config.IdentityConfig{})
 	if err != nil {
 		return fmt.Errorf("open db2 %s: %w", db2Path, err)
 	}
-	defer func() { _ = st2.Close() }()
+	defer func() { _ = enc2.Close() }()
 
-	assets1, err := st1.ListAssets(ctx, store.AssetFilter{})
+	assets1, err := enc1.ListAssets(ctx, store.AssetFilter{})
 	if err != nil {
 		return fmt.Errorf("list assets db1: %w", err)
 	}
 
-	assets2, err := st2.ListAssets(ctx, store.AssetFilter{})
+	assets2, err := enc2.ListAssets(ctx, store.AssetFilter{})
 	if err != nil {
 		return fmt.Errorf("list assets db2: %w", err)
 	}
@@ -792,15 +844,15 @@ func runAgent(cfgFile, dbPath, interval string, verbose, stream bool) error {
 		if mkErr := os.MkdirAll(dataDir, 0o750); mkErr != nil {
 			return fmt.Errorf("create data dir %s: %w", dataDir, mkErr)
 		}
-		sqliteStore, sqlErr := sqlite.New(dbPath)
+		encStore, sqlErr := openSQLiteStore(dbPath, cfg.Identity)
 		if sqlErr != nil {
 			return fmt.Errorf("open sqlite store: %w", sqlErr)
 		}
-		defer func() { _ = sqliteStore.Close() }()
-		if sqlErr = sqliteStore.Migrate(ctx); sqlErr != nil {
+		defer func() { _ = encStore.Close() }()
+		if sqlErr = encStore.Migrate(ctx); sqlErr != nil {
 			return fmt.Errorf("migrate sqlite store: %w", sqlErr)
 		}
-		st = sqliteStore
+		st = encStore.Store
 	}
 
 	registry := discovery.NewRegistry()
@@ -993,11 +1045,12 @@ Supported formats: json, csv, table, html.`,
 func runReport(dbPath, format, outputPath string) error {
 	ctx := context.Background()
 
-	st, err := sqlite.New(dbPath)
+	encStore, err := openSQLiteStore(dbPath, config.IdentityConfig{})
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = encStore.Close() }()
+	st := encStore.Store
 
 	assets, err := st.ListAssets(ctx, store.AssetFilter{})
 	if err != nil {
@@ -1256,11 +1309,17 @@ func runQuery(target, dbPath string, limit int, severity string) error {
 		q += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	encStore, err := openSQLiteStore(dbPath, config.IdentityConfig{})
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() { _ = encStore.Close() }()
+
+	innerStore, ok := encStore.Store.(*sqlite.SQLiteStore)
+	if !ok {
+		return fmt.Errorf("query requires SQLite backend")
+	}
+	db := innerStore.RawDB()
 
 	ctx := context.Background()
 	var rows *sql.Rows
@@ -1337,6 +1396,24 @@ If sqlite3 is not installed, prints a help message instead.`,
 }
 
 func runDB(dbPath string) error {
+	// Check if the database is encrypted — sqlite3 CLI cannot read it.
+	encrypted, err := sqlite.IsEncrypted(dbPath)
+	if err == nil && encrypted {
+		fmt.Println("Database is encrypted at rest. The sqlite3 CLI cannot read it.")
+		fmt.Println()
+		fmt.Println("Use the built-in query command instead:")
+		fmt.Println()
+		fmt.Println("  kite-collector query assets")
+		fmt.Println("  kite-collector query software")
+		fmt.Println("  kite-collector query findings")
+		fmt.Println("  kite-collector query scans")
+		fmt.Println()
+		fmt.Println("Or use the dashboard:")
+		fmt.Println()
+		fmt.Println("  kite-collector dashboard")
+		return nil
+	}
+
 	sqlite3Path, err := exec.LookPath("sqlite3")
 	if err != nil {
 		fmt.Println("sqlite3 is not installed or not in PATH.")
@@ -1487,11 +1564,15 @@ func runMigrate(dbPath string, status bool, repair string, dryRun bool) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	st, err := sqlite.New(dbPath)
+	encStore, err := openSQLiteStore(dbPath, config.IdentityConfig{})
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = encStore.Close() }()
+	st, ok := encStore.Store.(*sqlite.SQLiteStore)
+	if !ok {
+		return fmt.Errorf("migrate requires SQLite backend")
+	}
 
 	switch {
 	case status:
@@ -2046,11 +2127,12 @@ from the local SQLite database — no external connections are made.`,
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
 
-			st, err := sqlite.New(dbPath)
+			encStore, err := openSQLiteStore(dbPath, config.IdentityConfig{})
 			if err != nil {
 				return fmt.Errorf("open store: %w", err)
 			}
-			defer func() { _ = st.Close() }()
+			defer func() { _ = encStore.Close() }()
+			st := encStore.Store
 
 			rc := dashboard.NewReportContext(ctx, st, dbPath, version, commit)
 
