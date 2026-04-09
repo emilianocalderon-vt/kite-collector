@@ -18,6 +18,7 @@ import (
 	"runtime"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/hkdf"
 )
 
 // Identity holds the agent's persistent cryptographic identity.
@@ -74,6 +75,24 @@ func (id *Identity) UnmarshalJSON(data []byte) error {
 func (id *Identity) Fingerprint() string {
 	h := sha256.Sum256(id.PublicKey)
 	return fmt.Sprintf("sha256:%x", h)
+}
+
+// DeriveStorageKey derives a 32-byte AES-256 key for SQLite encryption
+// using HKDF-SHA256 with the agent's Ed25519 private key as input keying
+// material. The salt and info strings provide domain separation so the
+// same private key cannot produce identical keys for different purposes.
+//
+// See RFC-0077 §5.2.4 and §8 Task 1.6.
+func (id *Identity) DeriveStorageKey() ([]byte, error) {
+	salt := []byte("kite-storage-v1")
+	info := []byte("sqlite-encryption")
+
+	hkdfReader := hkdf.New(sha256.New, id.PrivateKey.Seed(), salt, info)
+	key := make([]byte, 32) // AES-256
+	if _, err := hkdfReader.Read(key); err != nil {
+		return nil, fmt.Errorf("derive storage key: %w", err)
+	}
+	return key, nil
 }
 
 // LoadOrCreate loads an existing identity from dataDir/identity.json, or
