@@ -38,7 +38,7 @@ func TestNewEncrypted_FreshDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, es)
 
-	require.NoError(t, es.Store.Migrate(context.Background()))
+	require.NoError(t, es.Migrate(context.Background()))
 	require.NoError(t, es.Close())
 
 	// After close, the encrypted file should exist.
@@ -62,11 +62,11 @@ func TestNewEncrypted_ReopenWithSameKey(t *testing.T) {
 	// Create, write data, close.
 	es, err := NewEncrypted(encPath, key, "keyring", slog.Default())
 	require.NoError(t, err)
-	require.NoError(t, es.Store.Migrate(context.Background()))
+	require.NoError(t, es.Migrate(context.Background()))
 
 	ctx := context.Background()
 	asset := makeTestAsset("test-host", model.AssetTypeServer)
-	_, _, err = es.Store.UpsertAssets(ctx, []model.Asset{asset})
+	_, _, err = es.UpsertAssets(ctx, []model.Asset{asset})
 	require.NoError(t, err)
 	require.NoError(t, es.Close())
 
@@ -74,7 +74,7 @@ func TestNewEncrypted_ReopenWithSameKey(t *testing.T) {
 	es2, err := NewEncrypted(encPath, key, "keyring", slog.Default())
 	require.NoError(t, err)
 
-	assets, err := es2.Store.ListAssets(ctx, store.AssetFilter{})
+	assets, err := es2.ListAssets(ctx, store.AssetFilter{})
 	require.NoError(t, err)
 	assert.Len(t, assets, 1)
 	assert.Equal(t, "test-host", assets[0].Hostname)
@@ -91,7 +91,7 @@ func TestNewEncrypted_ReopenWithWrongKeyFails(t *testing.T) {
 	// Create and close with key1.
 	es, err := NewEncrypted(encPath, key1, "tpm", slog.Default())
 	require.NoError(t, err)
-	require.NoError(t, es.Store.Migrate(context.Background()))
+	require.NoError(t, es.Migrate(context.Background()))
 	require.NoError(t, es.Close())
 
 	// Reopen with key2 — should fail.
@@ -134,7 +134,7 @@ func TestNewEncrypted_MigratesUnencryptedDatabase(t *testing.T) {
 	es, err := NewEncrypted(dbPath, key, "keyring", slog.Default())
 	require.NoError(t, err)
 
-	assets, err := es.Store.ListAssets(ctx, store.AssetFilter{})
+	assets, err := es.ListAssets(ctx, store.AssetFilter{})
 	require.NoError(t, err)
 	assert.Len(t, assets, 1)
 	assert.Equal(t, "pre-existing", assets[0].Hostname)
@@ -156,9 +156,9 @@ func TestNewEncrypted_MultipleWriteCloseCycles(t *testing.T) {
 	// Cycle 1: create + write.
 	es, err := NewEncrypted(encPath, key, "tpm", slog.Default())
 	require.NoError(t, err)
-	require.NoError(t, es.Store.Migrate(ctx))
+	require.NoError(t, es.Migrate(ctx))
 	asset1 := makeTestAsset("host-1", model.AssetTypeServer)
-	_, _, err = es.Store.UpsertAssets(ctx, []model.Asset{asset1})
+	_, _, err = es.UpsertAssets(ctx, []model.Asset{asset1})
 	require.NoError(t, err)
 	require.NoError(t, es.Close())
 
@@ -166,14 +166,14 @@ func TestNewEncrypted_MultipleWriteCloseCycles(t *testing.T) {
 	es, err = NewEncrypted(encPath, key, "tpm", slog.Default())
 	require.NoError(t, err)
 	asset2 := makeTestAsset("host-2", model.AssetTypeContainer)
-	_, _, err = es.Store.UpsertAssets(ctx, []model.Asset{asset2})
+	_, _, err = es.UpsertAssets(ctx, []model.Asset{asset2})
 	require.NoError(t, err)
 	require.NoError(t, es.Close())
 
 	// Cycle 3: reopen + verify both assets present.
 	es, err = NewEncrypted(encPath, key, "tpm", slog.Default())
 	require.NoError(t, err)
-	assets, err := es.Store.ListAssets(ctx, store.AssetFilter{})
+	assets, err := es.ListAssets(ctx, store.AssetFilter{})
 	require.NoError(t, err)
 	assert.Len(t, assets, 2)
 	require.NoError(t, es.Close())
@@ -187,7 +187,7 @@ func TestNewEncrypted_FileBackendWarnsButWorks(t *testing.T) {
 	// file backend should work — just emits a warning.
 	es, err := NewEncrypted(encPath, key, "file", slog.Default())
 	require.NoError(t, err)
-	require.NoError(t, es.Store.Migrate(context.Background()))
+	require.NoError(t, es.Migrate(context.Background()))
 	require.NoError(t, es.Close())
 }
 
@@ -202,7 +202,7 @@ func TestNewEncrypted_WorkingCopyOnRAMDisk(t *testing.T) {
 
 	es, err := NewEncrypted(encPath, key, "tpm", slog.Default())
 	require.NoError(t, err)
-	require.NoError(t, es.Store.Migrate(context.Background()))
+	require.NoError(t, es.Migrate(context.Background()))
 
 	assert.True(t, es.UseRAMDisk(), "working copy should be on RAM disk")
 
@@ -235,11 +235,11 @@ func TestNewEncrypted_NoPersistentPlaintextDuringOperation(t *testing.T) {
 
 	es, err := NewEncrypted(encPath, key, "tpm", slog.Default())
 	require.NoError(t, err)
-	require.NoError(t, es.Store.Migrate(context.Background()))
+	require.NoError(t, es.Migrate(context.Background()))
 
 	ctx := context.Background()
 	asset := makeTestAsset("sensitive-host", model.AssetTypeServer)
-	_, _, err = es.Store.UpsertAssets(ctx, []model.Asset{asset})
+	_, _, err = es.UpsertAssets(ctx, []model.Asset{asset})
 	require.NoError(t, err)
 
 	// When RAM disk is active, no .work files should exist on persistent storage.

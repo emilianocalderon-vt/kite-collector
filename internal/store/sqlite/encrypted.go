@@ -26,9 +26,9 @@ type EncryptedStore struct {
 	encPath      string          // path to the encrypted file on disk
 	workPath     string          // path to the decrypted working copy
 	keyBackend   string          // "tpm", "keyring", or "file"
-	useRAMDisk   bool            // true if working copy is on a RAM-backed filesystem
 	logger       *slog.Logger
 	key          []byte          // AES-256 key (32 bytes)
+	useRAMDisk   bool            // true if working copy is on a RAM-backed filesystem
 }
 
 // ramdiskCandidates lists potential RAM-backed directories per OS.
