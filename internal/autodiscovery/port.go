@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 const (
@@ -42,10 +44,7 @@ func probePorts(ctx context.Context, targets []string, ports []int, timeoutMs in
 
 	for _, target := range targets {
 		for _, port := range ports {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-
+			safenet.SafeGo(&wg, slog.Default(), "autodiscovery-probe-port", func() {
 				if ctx.Err() != nil {
 					return
 				}
@@ -61,7 +60,7 @@ func probePorts(ctx context.Context, targets []string, ports []int, timeoutMs in
 				mu.Lock()
 				results = append(results, openPort{Host: target, Port: port})
 				mu.Unlock()
-			}()
+			})
 		}
 	}
 
@@ -92,10 +91,7 @@ func fingerprintOpenPorts(ctx context.Context, open []openPort, services []Servi
 			continue
 		}
 		for _, sig := range candidates {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-
+			safenet.SafeGo(&wg, slog.Default(), "autodiscovery-fingerprint", func() {
 				if ctx.Err() != nil {
 					return
 				}
@@ -126,9 +122,17 @@ func fingerprintOpenPorts(ctx context.Context, open []openPort, services []Servi
 					return
 				}
 
+				if !sig.TLS {
+					slog.Warn("autodiscovery: service discovered via insecure (non-TLS) probe — consider enabling TLS",
+						"service", sig.Name,
+						"endpoint", endpoint,
+					)
+				}
+
 				slog.Info("autodiscovery: service confirmed by fingerprint",
 					"service", sig.Name,
 					"endpoint", endpoint,
+					"version", version,
 				)
 
 				status, missing := determineStatus(sig)
@@ -144,7 +148,7 @@ func fingerprintOpenPorts(ctx context.Context, open []openPort, services []Servi
 					Version:     version,
 				})
 				mu.Unlock()
-			}()
+			})
 		}
 	}
 
@@ -192,17 +196,50 @@ func fingerprint(ctx context.Context, endpoint, path, match string, timeout time
 
 	// Check body.
 	if match != "" && strings.Contains(content, match) {
-		return true, ""
+		return true, extractVersion(content, resp.Header)
 	}
 
 	// Check Server and X-Powered-By headers.
 	for _, hdr := range []string{"Server", "X-Powered-By"} {
 		if match != "" && strings.Contains(resp.Header.Get(hdr), match) {
-			return true, ""
+			return true, extractVersion(content, resp.Header)
 		}
 	}
 
 	return false, ""
+}
+
+// extractVersion attempts to extract a version string from a fingerprint
+// response.  It checks the Server header first, then scans the body for
+// common JSON version field patterns.
+func extractVersion(body string, headers http.Header) string {
+	// Server header often contains "ProductName/version".
+	if server := headers.Get("Server"); server != "" {
+		if idx := strings.LastIndexByte(server, '/'); idx >= 0 && idx < len(server)-1 {
+			return server[idx+1:]
+		}
+	}
+
+	// Scan body for common JSON version keys.
+	for _, prefix := range []string{
+		`"version":"`, `"Version":"`,
+		`"version": "`, `"Version": "`,
+		`"api_version":"`, `"api_version": "`,
+		`"ApiVersion":"`, `"ApiVersion": "`,
+		`"pveversion":"`, `"pveversion": "`,
+	} {
+		idx := strings.Index(body, prefix)
+		if idx < 0 {
+			continue
+		}
+		start := idx + len(prefix)
+		end := strings.IndexByte(body[start:], '"')
+		if end > 0 && end < 64 {
+			return body[start : start+end]
+		}
+	}
+
+	return ""
 }
 
 // buildEndpoint constructs a URL from host, port, and TLS preference.

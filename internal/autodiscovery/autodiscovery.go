@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"sync"
+
+	"github.com/vulnertrack/kite-collector/internal/safenet"
 )
 
 // DiscoveredService represents an infrastructure service found by the
@@ -91,9 +93,7 @@ func Run(ctx context.Context, opts Options) []DiscoveredService {
 	var wg sync.WaitGroup
 
 	// Port probe + fingerprinting.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	safenet.SafeGo(&wg, slog.Default(), "autodiscovery-ports", func() {
 		ports := allPorts(services)
 		if len(ports) == 0 {
 			return
@@ -101,51 +101,41 @@ func Run(ctx context.Context, opts Options) []DiscoveredService {
 		open := probePorts(ctx, targets, ports, opts.PortTimeout)
 		discovered := fingerprintOpenPorts(ctx, open, services, opts.HTTPTimeout)
 		collect(discovered)
-	}()
+	})
 
 	// Docker container probe.
 	if dockerSocket != "" {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		safenet.SafeGo(&wg, slog.Default(), "autodiscovery-docker", func() {
 			discovered := probeDockerContainers(ctx, dockerSocket, services)
 			collect(discovered)
-		}()
+		})
 	}
 
 	// Docker Compose label probe.
 	if dockerSocket != "" {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		safenet.SafeGo(&wg, slog.Default(), "autodiscovery-compose", func() {
 			discovered := probeDockerComposeLabels(ctx, dockerSocket, services)
 			collect(discovered)
-		}()
+		})
 	}
 
 	// Environment variable probe.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	safenet.SafeGo(&wg, slog.Default(), "autodiscovery-env", func() {
 		discovered := probeEnvVars(services)
 		collect(discovered)
-	}()
+	})
 
 	// DNS/mDNS .local probe.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	safenet.SafeGo(&wg, slog.Default(), "autodiscovery-dns", func() {
 		discovered := probeDNS(ctx, services, opts.HTTPTimeout)
 		collect(discovered)
-	}()
+	})
 
 	// Kubernetes in-cluster probe.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	safenet.SafeGo(&wg, slog.Default(), "autodiscovery-k8s", func() {
 		discovered := probeK8s(ctx, services)
 		collect(discovered)
-	}()
+	})
 
 	wg.Wait()
 
