@@ -8,12 +8,6 @@ discovery:
       enabled: true
       collect_software: true
       collect_interfaces: true
-    wazuh:
-      enabled: true
-      endpoint: https://localhost:55000
-      username: wazuh-wui
-      password: MyS3cr37P450r.*-
-      insecure: true
 
 streaming:
   interval: 60s
